@@ -43,17 +43,18 @@ NSE_SECTOR_INDICES = {
     "Nifty Financial Services": "NIFTY_FIN_SERVICE.NS",
     "Nifty IT":                 "^CNXIT",
     "Nifty Pharma":             "^CNXPHARMA",
-    "Nifty Healthcare":         "NIFTY_HEALTHCARE.NS",
+    "Nifty Healthcare":         "^CNXHC",
     "Nifty Auto":               "^CNXAUTO",
     "Nifty FMCG":               "^CNXFMCG",
     "Nifty Metal":              "^CNXMETAL",
     "Nifty Realty":             "^CNXREALTY",
     "Nifty Media":              "^CNXMEDIA",
-    "Nifty Chemicals":          "NIFTY_CHEM.NS",
-    "Nifty Consumer Durables":  "NIFTY_CONSR_DURBL.NS",
+    "Nifty Chemicals":          "^CNXCHEM",
+    "Nifty Consumer Durables":  "^CNXCONSDUR",
     "Nifty Energy":             "^CNXENERGY",
     "Nifty Infra":              "^CNXINFRA",
-    "Nifty Oil & Gas":          "NIFTY_OIL_AND_GAS.NS",
+    "Nifty Oil & Gas":          "^CNXOILGAS",
+    "Nifty India Defence":      "NIFTY_IND_DEFENCE.NS",
     "NIFTY 50":                 "^NSEI",
     "SENSEX":                   "^BSESN",
 }
@@ -80,7 +81,7 @@ SECTOR_STOCKS = {
     ],
     "Nifty IT": [
         "TCS", "INFY", "WIPRO", "HCLTECH", "TECHM",
-        "LTIM", "MPHASIS", "PERSISTENT", "COFORGE", "OFSS"
+        "LTM", "MPHASIS", "PERSISTENT", "COFORGE", "OFSS"
     ],
     "Nifty Pharma": [
         "SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "BIOCON",
@@ -111,7 +112,7 @@ SECTOR_STOCKS = {
         "BRIGADE", "SOBHA", "MAHLIFE", "LODHA"
     ],
     "Nifty Media": [
-        "ZEEL", "SUNTV", "PVRINOX", "NAZARA", "SAREGAMA", "TIPS"
+        "ZEEL", "SUNTV", "PVRINOX", "NAZARA", "SAREGAMA", "TIPSMUSIC", "TIPSFILMS"
     ],
     "Nifty Chemicals": [
         "PIDILITIND", "SRF", "UPL", "TATACHEM", "PIIND",
@@ -135,6 +136,10 @@ SECTOR_STOCKS = {
         "RELIANCE", "ONGC", "BPCL", "IOC", "HINDPETRO",
         "GAIL", "OIL", "PETRONET", "IGL", "MGL", "GUJGASLTD"
     ],
+    "Nifty India Defence": [
+    "HAL", "BEL", "BDL", "MAZDOCK", "COCHINSHIP",
+    "GRSE", "MTARTECH", "DATAPATTNS", "BEML"
+    ],
 }
 
 
@@ -155,21 +160,37 @@ def _polite_sleep():
 
 
 def _fetch_max_history(yf_ticker):
-    """Returns DataFrame or None."""
-    for attempt in range(3):
-        try:
-            df = yf.download(yf_ticker, period="max", interval="1d",
-                             progress=False, auto_adjust=True)
-            if df is None or df.empty:
-                return None
-            df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-            return df
-        except Exception as e:
-            if attempt < 2:
-                time.sleep(5 * (attempt + 1))
-            else:
-                print(f"      ❌ Failed after 3 attempts: {e}")
-                return None
+    """
+    Robust history fetch.
+    Some Nifty sectoral indices on yfinance reject period='max'.
+    We try a cascade: max → start=20y → 10y → 5y.
+    """
+    from datetime import datetime, timedelta
+    attempts = [
+        {"period": "max"},
+        {"start": (datetime.now() - timedelta(days=20 * 365)).strftime("%Y-%m-%d")},
+        {"start": (datetime.now() - timedelta(days=10 * 365)).strftime("%Y-%m-%d")},
+        {"period": "5y"},
+        {"period": "1y"},
+    ]
+    last_err = None
+    for kwargs in attempts:
+        for retry in range(2):  # 2 retries per kwarg
+            try:
+                df = yf.download(yf_ticker, interval="1d",
+                                 progress=False, auto_adjust=True, **kwargs)
+                if df is None or df.empty:
+                    break  # try next kwargs
+                df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+                return df
+            except Exception as e:
+                last_err = str(e)
+                if retry == 0:
+                    time.sleep(2)
+                else:
+                    break  # try next kwargs
+    if last_err:
+        print(f"      ❌ All attempts failed: {last_err}")
     return None
 
 

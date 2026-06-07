@@ -1,17 +1,16 @@
 """
-Database connection & query helpers — v2 with connection pooling.
-─────────────────────────────────────────────────────────────────
+Database connection & query helpers
+────────────────────────────────────
 - Reads DATABASE_URL from .env
-- Uses ThreadedConnectionPool — reuses connections instead of creating new ones
-- Backward compatible: all existing helpers unchanged from the caller's perspective
+- Provides connection management via context manager
+- Common query helpers used across scanner / bootstrap / refresh scripts
 """
 
 import os
-import atexit
 import pandas as pd
+from datetime import datetime, date
 from contextlib import contextmanager
 import psycopg2
-from psycopg2 import pool
 from psycopg2.extras import RealDictCursor, execute_values
 from dotenv import load_dotenv
 
@@ -26,77 +25,28 @@ if not DATABASE_URL:
 
 SCHEMA = "trade_scanner"
 
-# ─────────────────────────────────────────────
-# CONNECTION POOL (the speedup)
-# ─────────────────────────────────────────────
-# minconn=2: at least 1 idle conn
-# maxconn=12: enough for parallel work without overwhelming Railway
-_POOL = pool.ThreadedConnectionPool(minconn=2, maxconn=12, dsn=DATABASE_URL)
-
-
-def _close_pool():
-    if _POOL and not _POOL.closed:
-        _POOL.closeall()
-
-
-atexit.register(_close_pool)
-
 
 # ─────────────────────────────────────────────
-# CONNECTION CONTEXT MANAGERS
+# CONNECTION MANAGEMENT
 # ─────────────────────────────────────────────
 @contextmanager
 def get_conn():
-    """
-    Borrow a connection from the pool. Validates it's alive before use.
-    Dead connections are discarded and a fresh one is fetched.
-    """
-    conn = None
-    for attempt in range(3):
-        conn = _POOL.getconn()
-        try:
-            # Lightweight liveness check
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            cur.fetchone()
-            cur.close()
-            conn.rollback()   # close the implicit transaction started by SELECT 1
-            break  # connection is alive
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
-            # Discard the dead connection; pool will create a new one
-            try:
-                _POOL.putconn(conn, close=True)
-            except Exception:
-                pass
-            conn = None
-            if attempt == 2:
-                raise
-            continue
-
-    if conn is None:
-        raise RuntimeError("Could not obtain a live DB connection after 3 attempts")
-
+    """Yields a Postgres connection, commits on success, rolls back on error."""
+    conn = psycopg2.connect(DATABASE_URL)
     conn.autocommit = False
     try:
         yield conn
         conn.commit()
     except Exception:
-        try:
-            conn.rollback()
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
-            # If rollback fails because connection died mid-transaction, ignore
-            pass
+        conn.rollback()
         raise
     finally:
-        try:
-            _POOL.putconn(conn)
-        except Exception:
-            pass
+        conn.close()
 
 
 @contextmanager
 def get_cursor(dict_cursor=False):
-    """Convenience context: yields (conn, cursor) with search_path set."""
+    """Convenience context: yields (conn, cursor)."""
     with get_conn() as conn:
         cursor_factory = RealDictCursor if dict_cursor else None
         cur = conn.cursor(cursor_factory=cursor_factory)
@@ -108,7 +58,7 @@ def get_cursor(dict_cursor=False):
 
 
 def test_connection():
-    """Smoke test."""
+    """Smoke test — returns server version on success, raises on failure."""
     with get_cursor() as (_, cur):
         cur.execute("SELECT version();")
         return cur.fetchone()[0]
@@ -118,6 +68,7 @@ def test_connection():
 # SCHEMA MANAGEMENT
 # ─────────────────────────────────────────────
 def init_schema(schema_sql_path="schema.sql"):
+    """Apply schema.sql. Safe to run multiple times (CREATE IF NOT EXISTS)."""
     with open(schema_sql_path, "r", encoding="utf-8") as f:
         sql = f.read()
     with get_conn() as conn:
@@ -132,6 +83,7 @@ def init_schema(schema_sql_path="schema.sql"):
 # ─────────────────────────────────────────────
 def upsert_stock(symbol, yfinance_ticker=None, company_name=None,
                  isin=None, is_fno=True, is_active=True):
+    """Insert or update stock master record."""
     with get_cursor() as (_, cur):
         cur.execute("""
             INSERT INTO stocks (symbol, yfinance_ticker, company_name, isin,
@@ -148,6 +100,7 @@ def upsert_stock(symbol, yfinance_ticker=None, company_name=None,
 
 
 def upsert_sector_mapping(symbol, sectors):
+    """Replace sector mapping for a symbol."""
     with get_cursor() as (_, cur):
         cur.execute("DELETE FROM stock_sectors WHERE symbol = %s;", (symbol,))
         if sectors:
@@ -159,6 +112,7 @@ def upsert_sector_mapping(symbol, sectors):
 
 
 def get_all_stocks(active_only=True):
+    """Returns list of stock symbols."""
     sql = "SELECT symbol FROM stocks"
     if active_only:
         sql += " WHERE is_active = TRUE"
@@ -169,6 +123,7 @@ def get_all_stocks(active_only=True):
 
 
 def get_stocks_by_sector(sector):
+    """Returns symbols for a sector."""
     with get_cursor() as (_, cur):
         cur.execute("""
             SELECT s.symbol FROM stocks s
@@ -185,20 +140,11 @@ def mark_data_refreshed(symbol):
                     (symbol,))
 
 
-def get_quality_flagged_symbols():
-    """Returns set of symbols where data_quality_flag != 'OK'."""
-    with get_cursor() as (_, cur):
-        cur.execute("""
-            SELECT symbol FROM stocks
-            WHERE data_quality_flag IS NOT NULL AND data_quality_flag != 'OK'
-        """)
-        return {r[0] for r in cur.fetchall()}
-
-
 # ─────────────────────────────────────────────
 # DAILY PRICES
 # ─────────────────────────────────────────────
 def get_latest_trade_date(symbol):
+    """Returns the latest trade_date for a symbol, or None."""
     with get_cursor() as (_, cur):
         cur.execute("""
             SELECT MAX(trade_date) FROM daily_prices WHERE symbol = %s
@@ -207,37 +153,30 @@ def get_latest_trade_date(symbol):
         return row[0] if row and row[0] else None
 
 
-def get_latest_trade_dates_bulk(symbols):
-    """
-    NEW: Bulk lookup. Returns {symbol: latest_date}.
-    Replaces 200 separate get_latest_trade_date() calls with one query.
-    """
-    if not symbols:
-        return {}
-    with get_cursor() as (_, cur):
-        cur.execute("""
-            SELECT symbol, MAX(trade_date) FROM daily_prices
-            WHERE symbol = ANY(%s)
-            GROUP BY symbol
-        """, (list(symbols),))
-        return {r[0]: r[1] for r in cur.fetchall()}
-
-
 def insert_daily_prices(symbol, df):
+    """
+    Bulk insert/upsert OHLCV data.
+    df must have columns: Open, High, Low, Close, Volume and a DatetimeIndex.
+    """
     if df is None or df.empty:
         return 0
+
     rows = []
     for idx, row in df.iterrows():
         trade_dt = idx.date() if hasattr(idx, "date") else idx
         try:
             rows.append((
-                symbol, trade_dt,
-                float(row['Open']), float(row['High']),
-                float(row['Low']),  float(row['Close']),
+                symbol,
+                trade_dt,
+                float(row['Open']),
+                float(row['High']),
+                float(row['Low']),
+                float(row['Close']),
                 int(row['Volume']) if pd.notna(row['Volume']) else 0,
             ))
         except (TypeError, ValueError):
-            continue
+            continue  # skip malformed rows silently
+
     if not rows:
         return 0
 
@@ -261,6 +200,10 @@ def insert_daily_prices(symbol, df):
 
 
 def fetch_prices_df(symbol, start_date=None, limit=None):
+    """
+    Fetch OHLCV history for a symbol as a DataFrame (DatetimeIndex).
+    Used by the scanner so it doesn't hit yfinance for analysis.
+    """
     sql = """
         SELECT trade_date, open, high, low, close, volume
         FROM daily_prices WHERE symbol = %s
@@ -276,65 +219,24 @@ def fetch_prices_df(symbol, start_date=None, limit=None):
     with get_cursor() as (_, cur):
         cur.execute(sql, params)
         rows = cur.fetchall()
+
     if not rows:
         return None
+
     df = pd.DataFrame(rows, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume'])
-    df['Date'] = pd.to_datetime(df['Date'])
-    df = df.set_index('Date').astype({'Open': float, 'High': float, 'Low': float,
-                                      'Close': float, 'Volume': float})
+    df['Date']  = pd.to_datetime(df['Date'])
+    df          = df.set_index('Date')
+    df          = df.astype({'Open': float, 'High': float, 'Low': float,
+                             'Close': float, 'Volume': float})
     return df
 
-
-def fetch_prices_df_adjusted(symbol, start_date=None, limit=None):
-    """
-    Like fetch_prices_df but applies all active adjustments in memory.
-
-    Reads:
-      - daily_prices (raw OHLCV)
-      - corporate_action_adjustments (factors keyed by effective_date)
-
-    Adjustments:
-      - For each row in corporate_action_adjustments for this symbol,
-        rows in the returned DataFrame with index date < effective_date
-        get OHLC multiplied by price_factor and Volume multiplied by volume_factor.
-
-    Returns:
-      DataFrame (DatetimeIndex), columns Open/High/Low/Close/Volume, or None.
-    """
-    df = fetch_prices_df(symbol, start_date=start_date, limit=limit)
-    if df is None or df.empty:
-        return df
-
-    with get_cursor() as (_, cur):
-        cur.execute("""
-            SELECT effective_date, price_factor, volume_factor
-            FROM corporate_action_adjustments
-            WHERE symbol = %s
-            ORDER BY effective_date
-        """, (symbol,))
-        adjustments = cur.fetchall()
-
-    if not adjustments:
-        return df
-
-    for eff_date, price_factor, volume_factor in adjustments:
-        pf = float(price_factor)
-        vf = float(volume_factor) if volume_factor is not None else 1.0
-        mask = df.index.date < eff_date
-        if not mask.any():
-            continue
-        df.loc[mask, 'Open']   = df.loc[mask, 'Open']   * pf
-        df.loc[mask, 'High']   = df.loc[mask, 'High']   * pf
-        df.loc[mask, 'Low']    = df.loc[mask, 'Low']    * pf
-        df.loc[mask, 'Close']  = df.loc[mask, 'Close']  * pf
-        df.loc[mask, 'Volume'] = df.loc[mask, 'Volume'] * vf
-
-    return df
 
 def delete_prices(symbol):
+    """Delete all daily_prices for a symbol. Used by refresh_stock.py."""
     with get_cursor() as (_, cur):
         cur.execute("DELETE FROM daily_prices WHERE symbol = %s", (symbol,))
         return cur.rowcount
+
 
 # ─────────────────────────────────────────────
 # INDEX PRICES
@@ -399,13 +301,6 @@ def fetch_index_df(index_name, start_date=None):
     return df
 
 
-def delete_index_prices(index_name):
-    """Delete all rows for an index_name. Used to prune failed index entries."""
-    with get_cursor() as (_, cur):
-        cur.execute("DELETE FROM index_prices WHERE index_name = %s", (index_name,))
-        return cur.rowcount
-
-
 # ─────────────────────────────────────────────
 # JOB RUNS
 # ─────────────────────────────────────────────
@@ -437,6 +332,10 @@ def finish_job_run(job_id, status, stocks_processed=0, signals_found=0,
 # SCAN RESULTS
 # ─────────────────────────────────────────────
 def save_scan_result(scan_date, stock_data):
+    """
+    Persist a single scan result.
+    stock_data should match the dict produced by scan_stock().
+    """
     def _parse_money(s):
         if isinstance(s, (int, float)):
             return float(s)
@@ -444,6 +343,7 @@ def save_scan_result(scan_date, stock_data):
             return None
         return float(s.replace("₹", "").replace(",", "").strip())
 
+    # Entry zone "₹148 – ₹149"
     entry_low, entry_high = None, None
     ez = stock_data.get("entry_zone", "")
     if "–" in ez:
@@ -491,7 +391,7 @@ def save_scan_result(scan_date, stock_data):
 
 
 # ─────────────────────────────────────────────
-# QUICK STATS
+# QUICK STATS (handy for monitoring)
 # ─────────────────────────────────────────────
 def quick_stats():
     with get_cursor(dict_cursor=True) as (_, cur):
@@ -509,7 +409,7 @@ def quick_stats():
 
 
 if __name__ == "__main__":
-    print("Testing pooled DB connection...")
+    print("Testing DB connection...")
     try:
         version = test_connection()
         print(f"✅ Connected: {version[:60]}...")

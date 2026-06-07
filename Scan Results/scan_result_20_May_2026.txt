@@ -1,0 +1,566 @@
+============================================================
+📊 NSE F&O MARKET SCANNER REPORT
+📅 20 May 2026 | ⏰ 09:35 PM
+============================================================
+
+🚩 CORPORATE ACTION FLAGS (review recommended)
+------------------------------------------------------------
+  GENUSPOWER      | DEMERGER   | ex-date: 06-Feb-2026 
+      Demerger
+  DALMIASUG       | DEMERGER   | ex-date: 31-Oct-2025 
+      Demerger
+  DCMSRIND        | DEMERGER   | ex-date: 26-Dec-2025 
+      Demerger
+  HINDUNILVR      | DEMERGER   | ex-date: 05-Dec-2025 
+      Demerger
+  ALLCARGO        | DEMERGER   | ex-date: 12-Nov-2025 
+      Demerger
+  SHANKARA        | DEMERGER   | ex-date: 24-Sep-2025 
+      Demerger
+  SKFINDIA        | DEMERGER   | ex-date: 15-Oct-2025 
+      Demerger
+  TMPV            | DEMERGER   | ex-date: 14-Oct-2025 
+      Demerger
+  TVSMOTOR        | DEMERGER   | ex-date: 25-Aug-2025 
+      Scheme Of Arrangement - Bonus Ncrps 4:1
+  CPCAP           | DEMERGER   | ex-date: 09-May-2025 
+      Demerger
+  DBREALTY        | DEMERGER   | ex-date: 18-Jul-2025 
+      Demerger
+  KHADIM          | DEMERGER   | ex-date: 06-Jun-2025 
+      Demerger
+  ABFRL           | DEMERGER   | ex-date: 22-May-2025 
+      Demerger
+  RAYMOND         | DEMERGER   | ex-date: 14-May-2025 
+      Demerger
+  CHEMBOND        | DEMERGER   | ex-date: 09-May-2025 
+      Demerger
+  STLTECH         | DEMERGER   | ex-date: 24-Apr-2025 
+      Demerger
+  QUESS           | DEMERGER   | ex-date: 15-Apr-2025 
+      Demerger
+  SIEMENS         | DEMERGER   | ex-date: 07-Apr-2025 
+      Demerger
+  KESORAMIND      | DEMERGER   | ex-date: 10-Mar-2025 
+      Demerger
+  STAR            | DEMERGER   | ex-date: 06-Dec-2024 
+      Demerger
+  ITC             | DEMERGER   | ex-date: 06-Jan-2025 
+      Demerger
+  ROSSELLIND      | DEMERGER   | ex-date: 20-Sep-2024 
+      Demerger
+  HERCULES        | DEMERGER   | ex-date: 11-Oct-2024 
+      Demerger
+  CCAVENUE        | DEMERGER   | ex-date: 11-Sep-2024 
+      Demerger
+  SANOFI          | DEMERGER   | ex-date: 13-Jun-2024 
+      Demerger
+  AJMERA          | DEMERGER   | ex-date: 02-Aug-2024 
+      Demerger
+  RAYMOND         | DEMERGER   | ex-date: 11-Jul-2024 
+      Demerger
+  OCCL            | DEMERGER   | ex-date: 01-Jul-2024 
+      Demerger
+  UEL             | DEMERGER   | ex-date: 22-May-2024 
+      Demerger
+  SEMAC           | DEMERGER   | ex-date: 03-May-2024 
+      Demerger
+  MHLXMIRU        | DEMERGER   | ex-date: 19-Apr-2024 
+      Demerger
+  BOROLTD         | DEMERGER   | ex-date: 05-Dec-2023 
+      Demerger
+  BAJAJELEC       | DEMERGER   | ex-date: 14-Sep-2023 
+      Demerger
+  JHS             | DEMERGER   | ex-date: 11-Sep-2023 
+      Demerger
+  TVSHLTD         | DEMERGER   | ex-date: 24-Aug-2023 
+      Demerger
+  EDELWEISS       | DEMERGER   | ex-date: 02-Jun-2023 
+      Demerger
+  NIITLTD         | DEMERGER   | ex-date: 08-Jun-2023 
+      Demerger
+  SAREGAMA        | DEMERGER   | ex-date: 27-Jul-2023 
+      Demerger
+  RELIANCE        | DEMERGER   | ex-date: 20-Jul-2023 
+      Demerger
+  VAKRANGEE       | DEMERGER   | ex-date: 15-Jun-2023 
+      Demerger
+  SCI             | DEMERGER   | ex-date: 31-Mar-2023 
+      Demerger
+  ALLCARGO        | DEMERGER   | ex-date: 18-Apr-2023 
+      Demerger
+  GHCL            | DEMERGER   | ex-date: 06-Apr-2023 
+      Demerger
+  MIRZAINT        | DEMERGER   | ex-date: 29-Mar-2023 
+      Demerger
+  RADIOCITY       | DEMERGER   | ex-date: 13-Jan-2023 
+      Scheme Of Arrangement - Bonus Ncrps 1:10
+  NDLVENTURE      | DEMERGER   | ex-date: 22-Nov-2022 
+      Demerger
+  PEL             | DEMERGER   | ex-date: 30-Aug-2022 
+      Demerger
+  NMDC            | DEMERGER   | ex-date: 27-Oct-2022 
+      Demerger
+  AARTIIND        | DEMERGER   | ex-date: 19-Oct-2022 
+      Demerger
+  AHLEAST         | DEMERGER   | ex-date: 06-Oct-2022 
+      Demerger
+  BEML            | DEMERGER   | ex-date: 08-Sep-2022 
+      Demerger
+  KAMDHENU        | DEMERGER   | ex-date: 06-Sep-2022 
+      Demerger
+  IBULLSLTD       | DEMERGER   | ex-date: 01-Sep-2022 
+      Demerger
+  TIPSMUSIC       | DEMERGER   | ex-date: 19-May-2022 
+      Demerger
+  DHAMPURSUG      | DEMERGER   | ex-date: 13-May-2022 
+      Demerger
+  ARSHIYA         | DEMERGER   | ex-date: 03-Mar-2022 
+      Demerger
+  GMRAIRPORT      | DEMERGER   | ex-date: 11-Jan-2022 
+      Demerger
+  MOTHERSON       | DEMERGER   | ex-date: 14-Jan-2022 
+      Demerger
+  VEDL            | DEMERGER   | ex-date: 30-Apr-2026 
+      Demerger
+------------------------------------------------------------
+
+📅 UPCOMING CORP ACTIONS (next 7 days)
+------------------------------------------------------------
+  20-May-2026  | GARFIBRES    | BUYBACK   
+      Buy Back
+  20-May-2026  | GESHIP       | DIVIDEND  
+      Interim Dividend - Rs 11.70 Per Share
+  20-May-2026  | IRBINVIT     | DIVIDEND  
+      Distribution Rs 1.60 Consists Of Rs 1.44 Per Unit As Interest/ Re 0.12 Per Unit 
+  20-May-2026  | PGINVIT      | DIVIDEND  
+      Distribution - Rs 3 Per Unit Consist Of Rs 1.71 Per Unit As Interest/ Re 0.50 Pe
+  20-May-2026  | ESSENTIA     | RIGHTS    
+      Rights 161:250 @ Premium Re 0.45 /-
+  21-May-2026  | GMBREW       | DIVIDEND  
+      Dividend - Rs 9 Per Share
+  21-May-2026  | PGIL         | DIVIDEND  
+      Interim Dividend - Rs 8.50 Per Share
+  21-May-2026  | AVG          | RIGHTS    
+      Rights 8:33 @ Premium Rs 135/-
+  21-May-2026  | ITCHOTELS    | DIVIDEND  
+      Dividend - Re 1 Per Share
+  22-May-2026  | HSCL         | DIVIDEND  
+      Dividend - Re 0.80 Per Share
+  22-May-2026  | CMSINFO      | BUYBACK   
+      Buy Back
+  22-May-2026  | LTTS         | DIVIDEND  
+      Dividend - Rs 40 Per Share
+  22-May-2026  | 815GS2026    | OTHER     
+      Interest Payment
+  22-May-2026  | JINDALSAW    | DIVIDEND  
+      Dividend - Rs 2 Per Share
+  22-May-2026  | VINYLINDIA   | DIVIDEND  
+      Dividend - Rs 7 Per Share
+  22-May-2026  | LT           | DIVIDEND  
+      Dividend - Rs 38 Per Share
+  22-May-2026  | LTF          | DIVIDEND  
+      Dividend - Rs 2.75 Per Share
+  22-May-2026  | SULA         | DIVIDEND  
+      Dividend - Rs 2 Per Share
+  22-May-2026  | MAITHANALL   | DIVIDEND  
+      Interim Dividend - Rs 11 Per Share
+  22-May-2026  | WELSPUNLIV   | BUYBACK   
+      Buy Back
+  22-May-2026  | JLHL         | DIVIDEND  
+      Interim Dividend - Re 1 Per Share
+  22-May-2026  | HAVELLS      | DIVIDEND  
+      Dividend - Rs 6 Per Share
+  22-May-2026  | TRIDENT      | DIVIDEND  
+      Interim Dividend - Rs  0.50 Per Share
+  25-May-2026  | TCS          | DIVIDEND  
+      Dividend - Rs 31 Per Share
+  25-May-2026  | TATACONSUM   | DIVIDEND  
+      Dividend - Rs 10 Per Share
+  25-May-2026  | LTM          | DIVIDEND  
+      Dividend - Rs 53 Per Share
+  25-May-2026  | SIYSIL       | DIVIDEND  
+      Special Dividend - Rs 4 Per Share
+  26-May-2026  | HATSUN       | DIVIDEND  
+      Interim Dividend - Rs  10 Per Share
+  27-May-2026  | 662GS2051    | OTHER     
+      Interest Payment
+------------------------------------------------------------
+
+🌐 MARKET DIRECTION
+------------------------------
+  NIFTY 50: 📉 Bearish  |  Price: 23659.0  |  RSI: 45.63
+  SENSEX: 📉 Bearish  |  Price: 75318.39  |  RSI: 43.05
+
+📂 SECTOR STATUS
+------------------------------
+  🔴 Nifty Bank: Bearish  (RSI: 41.29)
+  🔴 Nifty Private Bank: Bearish  (RSI: 45.11)
+  🔴 Nifty PSU Bank: Bearish  (RSI: 36.16)
+  🔴 Nifty Financial Services: Bearish  (RSI: 43.28)
+  🟡 Nifty IT: Neutral  (RSI: 48.91)
+  🟢 Nifty Pharma: Bullish Breakout  (RSI: 75.55)
+  🟢 Nifty Healthcare [synth]: Bullish Breakout  (RSI: 58.34)
+  🔴 Nifty Auto: Bearish  (RSI: 47.87)
+  🔴 Nifty FMCG: Bearish  (RSI: 51.34)
+  🟢 Nifty Metal: Bullish Breakout  (RSI: 58.76)
+  🔴 Nifty Realty: Bearish  (RSI: 47.57)
+  🔴 Nifty Media: Bearish  (RSI: 46.4)
+  🟢 Nifty Chemicals [synth]: Bullish Breakout  (RSI: 56.62)
+  🔴 Nifty Consumer Durables [synth]: Bearish  (RSI: 33.66)
+  🟢 Nifty Energy: Bullish Breakout  (RSI: 58.31)
+  🟡 Nifty Infra: Neutral  (RSI: 53.33)
+  🔴 Nifty Oil & Gas [synth]: Bearish  (RSI: 42.0)
+  ⚪ Nifty India Defence [none]: Data Unavailable  (RSI: 0)
+
+🚀 BREAKOUT SECTOR STOCKS (Top 3/sector)
+------------------------------
+
+  [Nifty Pharma]
+  📌 BIOCON @ ₹432.7 | ⚡ AGFS
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 78.99 / 68.06 / 62.09
+     Entry Type     : Breakout
+     Entry Zone     : ₹432.7 – ₹434.86
+     Stop Loss      : ₹420.95
+     Target 1       : ₹456.21
+     Target 2       : ₹467.96
+     Risk:Reward    : 1:1.53
+  📌 LAURUSLABS @ ₹1361.1 | ⚡ AGFS
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 83.87 / 76.97 / 76.63
+     Entry Type     : Breakout
+     Entry Zone     : ₹1361.1 – ₹1367.91
+     Stop Loss      : ₹1327.74
+     Target 1       : ₹1427.81
+     Target 2       : ₹1461.17
+     Risk:Reward    : 1:1.49
+  📌 ZYDUSLIFE @ ₹1040.85 | ⚡ AGFS
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 70.93 / 66.43 / 62.56
+     Entry Type     : Watch
+     Entry Zone     : ₹1082.71 – ₹1099.12
+     Stop Loss      : ₹1062.92
+     Target 1       : ₹1155.11
+     Target 2       : ₹1185.84
+     Risk:Reward    : 1:1.55
+
+  [Nifty Healthcare]
+  📌 BIOCON @ ₹432.7 | ⚡ AGFS
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 78.99 / 68.06 / 62.09
+     Entry Type     : Breakout
+     Entry Zone     : ₹432.7 – ₹434.86
+     Stop Loss      : ₹420.95
+     Target 1       : ₹456.21
+     Target 2       : ₹467.96
+     Risk:Reward    : 1:1.53
+  📌 LAURUSLABS @ ₹1361.1 | ⚡ AGFS
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 83.87 / 76.97 / 76.63
+     Entry Type     : Breakout
+     Entry Zone     : ₹1361.1 – ₹1367.91
+     Stop Loss      : ₹1327.74
+     Target 1       : ₹1427.81
+     Target 2       : ₹1461.17
+     Risk:Reward    : 1:1.49
+  📌 ZYDUSLIFE @ ₹1040.85 | ⚡ AGFS
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 70.93 / 66.43 / 62.56
+     Entry Type     : Watch
+     Entry Zone     : ₹1082.71 – ₹1099.12
+     Stop Loss      : ₹1062.92
+     Target 1       : ₹1155.11
+     Target 2       : ₹1185.84
+     Risk:Reward    : 1:1.55
+
+  [Nifty Metal]
+  📌 HINDALCO @ ₹1085.5 | ⚡ AGFS
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 60.44 / 71.84 / 73.39
+     Entry Type     : Watch
+     Entry Zone     : ₹1093.95 – ₹1110.52
+     Stop Loss      : ₹1075.81
+     Target 1       : ₹1163.38
+     Target 2       : ₹1192.57
+     Risk:Reward    : 1:1.52
+  📌 VEDL @ ₹333.75 | ⚡ AGFS | 🚩 CORP ACTION
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 65.15 / 76.94 / 82.27
+     Entry Type     : Watch
+     Entry Zone     : ₹337.24 – ₹342.35
+     Stop Loss      : ₹328.37
+     Target 1       : ₹365.21
+     Target 2       : ₹377.49
+     Risk:Reward    : 1:1.64
+  📌 SAIL @ ₹199.04 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 65.95 / 75.94 / 72.48
+     Entry Type     : Watch
+     Entry Zone     : ₹207.6 – ₹210.75
+     Stop Loss      : ₹202.64
+     Target 1       : ₹223.82
+     Target 2       : ₹230.88
+     Risk:Reward    : 1:1.61
+
+  [Nifty Chemicals]
+  📌 NAVINFLUOR @ ₹7046.5 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 63.4 / 67.41 / 74.67
+     Entry Type     : Watch
+     Entry Zone     : ₹7128.0 – ₹7236.0
+     Stop Loss      : ₹7005.11
+     Target 1       : ₹7589.78
+     Target 2       : ₹7784.67
+     Risk:Reward    : 1:1.53
+
+  [Nifty Energy]
+  📌 ADANIPOWER @ ₹220.24 | ⚡ AGFS
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 60.42 / 78.13 / 78.02
+     Entry Type     : Watch
+     Entry Zone     : ₹232.06 – ₹235.57
+     Stop Loss      : ₹226.1
+     Target 1       : ₹251.01
+     Target 2       : ₹259.31
+     Risk:Reward    : 1:1.63
+
+
+🎯 GFS PICKS: None today
+
+
+⚡ AGFS STRATEGY PICKS
+------------------------------
+  📌 AUROPHARMA @ ₹1517.5 | ⚡ AGFS
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 72.68 / 76.03 / 67.75
+     Entry Type     : Watch
+     Entry Zone     : ₹1523.61 – ₹1546.69
+     Stop Loss      : ₹1505.8
+     Target 1       : ₹1605.39
+     Target 2       : ₹1638.59
+     Risk:Reward    : 1:1.44
+  📌 BIOCON @ ₹432.7 | ⚡ AGFS
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 78.99 / 68.06 / 62.09
+     Entry Type     : Breakout
+     Entry Zone     : ₹432.7 – ₹434.86
+     Stop Loss      : ₹420.95
+     Target 1       : ₹456.21
+     Target 2       : ₹467.96
+     Risk:Reward    : 1:1.53
+  📌 DIVISLAB @ ₹6893.0 | ⚡ AGFS
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 67.93 / 65.19 / 62.31
+     Entry Type     : Watch
+     Entry Zone     : ₹6898.32 – ₹7002.84
+     Stop Loss      : ₹6820.2
+     Target 1       : ₹7263.6
+     Target 2       : ₹7411.4
+     Risk:Reward    : 1:1.43
+  📌 GRANULES @ ₹758.65 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 70.25 / 75.4 / 70.86
+     Entry Type     : Watch
+     Entry Zone     : ₹765.47 – ₹777.07
+     Stop Loss      : ₹750.6
+     Target 1       : ₹818.4
+     Target 2       : ₹841.0
+     Risk:Reward    : 1:1.56
+  📌 IPCALAB @ ₹1646.6 | ⚡ AGFS
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 69.49 / 61.91 / 61.98
+     Entry Type     : Watch
+     Entry Zone     : ₹1661.52 – ₹1686.69
+     Stop Loss      : ₹1628.92
+     Target 1       : ₹1777.06
+     Target 2       : ₹1826.43
+     Risk:Reward    : 1:1.56
+  📌 LAURUSLABS @ ₹1361.1 | ⚡ AGFS
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 83.87 / 76.97 / 76.63
+     Entry Type     : Breakout
+     Entry Zone     : ₹1361.1 – ₹1367.91
+     Stop Loss      : ₹1327.74
+     Target 1       : ₹1427.81
+     Target 2       : ₹1461.17
+     Risk:Reward    : 1:1.49
+  📌 SUNPHARMA @ ₹1880.3 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 62.58 / 62.65 / 61.47
+     Entry Type     : Watch
+     Entry Zone     : ₹1897.43 – ₹1926.18
+     Stop Loss      : ₹1876.25
+     Target 1       : ₹1997.31
+     Target 2       : ₹2037.66
+     Risk:Reward    : 1:1.42
+  📌 ZYDUSLIFE @ ₹1040.85 | ⚡ AGFS
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 70.93 / 66.43 / 62.56
+     Entry Type     : Watch
+     Entry Zone     : ₹1082.71 – ₹1099.12
+     Stop Loss      : ₹1062.92
+     Target 1       : ₹1155.11
+     Target 2       : ₹1185.84
+     Risk:Reward    : 1:1.55
+  📌 APOLLOHOSP @ ₹8078.5 | ⚡ AGFS
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 63.39 / 62.34 / 63.36
+     Entry Type     : Watch
+     Entry Zone     : ₹8098.2 – ₹8220.9
+     Stop Loss      : ₹8026.23
+     Target 1       : ₹8487.54
+     Target 2       : ₹8641.31
+     Risk:Reward    : 1:1.37
+  📌 FORTIS @ ₹974.6 | ⚡ AGFS
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 64.5 / 61.42 / 64.8
+     Entry Type     : Breakout
+     Entry Zone     : ₹974.6 – ₹979.47
+     Stop Loss      : ₹950.88
+     Target 1       : ₹1022.04
+     Target 2       : ₹1045.76
+     Risk:Reward    : 1:1.49
+  📌 HINDALCO @ ₹1085.5 | ⚡ AGFS
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 60.44 / 71.84 / 73.39
+     Entry Type     : Watch
+     Entry Zone     : ₹1093.95 – ₹1110.52
+     Stop Loss      : ₹1075.81
+     Target 1       : ₹1163.38
+     Target 2       : ₹1192.57
+     Risk:Reward    : 1:1.52
+  📌 SAIL @ ₹199.04 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 65.95 / 75.94 / 72.48
+     Entry Type     : Watch
+     Entry Zone     : ₹207.6 – ₹210.75
+     Stop Loss      : ₹202.64
+     Target 1       : ₹223.82
+     Target 2       : ₹230.88
+     Risk:Reward    : 1:1.61
+  📌 VEDL @ ₹333.75 | ⚡ AGFS | 🚩 CORP ACTION
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 65.15 / 76.94 / 82.27
+     Entry Type     : Watch
+     Entry Zone     : ₹337.24 – ₹342.35
+     Stop Loss      : ₹328.37
+     Target 1       : ₹365.21
+     Target 2       : ₹377.49
+     Risk:Reward    : 1:1.64
+  📌 NAVINFLUOR @ ₹7046.5 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 63.4 / 67.41 / 74.67
+     Entry Type     : Watch
+     Entry Zone     : ₹7128.0 – ₹7236.0
+     Stop Loss      : ₹7005.11
+     Target 1       : ₹7589.78
+     Target 2       : ₹7784.67
+     Risk:Reward    : 1:1.53
+  📌 ADANIPOWER @ ₹220.24 | ⚡ AGFS
+     Breakout Score : 2/7
+     RSI (D/W/M)    : 60.42 / 78.13 / 78.02
+     Entry Type     : Watch
+     Entry Zone     : ₹232.06 – ₹235.57
+     Stop Loss      : ₹226.1
+     Target 1       : ₹251.01
+     Target 2       : ₹259.31
+     Risk:Reward    : 1:1.63
+  📌 ADANIPORTS @ ₹1772.6 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 64.73 / 69.0 / 65.96
+     Entry Type     : Watch
+     Entry Zone     : ₹1805.66 – ₹1833.02
+     Stop Loss      : ₹1773.78
+     Target 1       : ₹1924.13
+     Target 2       : ₹1974.25
+     Risk:Reward    : 1:1.54
+  📌 BAJAJ-AUTO @ ₹10462.5 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 60.7 / 62.81 / 64.56
+     Entry Type     : Watch
+     Entry Zone     : ₹10677.15 – ₹10838.92
+     Stop Loss      : ₹10525.72
+     Target 1       : ₹11303.56
+     Target 2       : ₹11562.84
+     Risk:Reward    : 1:1.48
+  📌 BHEL @ ₹408.4 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 71.02 / 77.92 / 71.8
+     Entry Type     : Watch
+     Entry Zone     : ₹413.72 – ₹419.99
+     Stop Loss      : ₹403.22
+     Target 1       : ₹447.26
+     Target 2       : ₹461.93
+     Risk:Reward    : 1:1.63
+  📌 CUMMINSIND @ ₹5399.5 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 60.56 / 74.45 / 73.01
+     Entry Type     : Watch
+     Entry Zone     : ₹5415.8 – ₹5497.85
+     Stop Loss      : ₹5330.05
+     Target 1       : ₹5751.39
+     Target 2       : ₹5891.84
+     Risk:Reward    : 1:1.51
+  📌 GRASIM @ ₹2971.1 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 65.73 / 61.77 / 61.54
+     Entry Type     : Watch
+     Entry Zone     : ₹2977.23 – ₹3022.34
+     Stop Loss      : ₹2941.79
+     Target 1       : ₹3138.31
+     Target 2       : ₹3203.82
+     Risk:Reward    : 1:1.44
+  📌 MARICO @ ₹838.45 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 67.68 / 69.06 / 68.31
+     Entry Type     : Watch
+     Entry Zone     : ₹840.31 – ₹853.04
+     Stop Loss      : ₹831.71
+     Target 1       : ₹882.99
+     Target 2       : ₹900.08
+     Risk:Reward    : 1:1.4
+  📌 MOTHERSON @ ₹132.17 | ⚡ AGFS | 🚩 CORP ACTION
+     Breakout Score : 3/7
+     RSI (D/W/M)    : 60.33 / 60.98 / 61.05
+     Entry Type     : Watch
+     Entry Zone     : ₹134.64 – ₹136.68
+     Stop Loss      : ₹131.48
+     Target 1       : ₹145.04
+     Target 2       : ₹149.56
+     Risk:Reward    : 1:1.61
+  📌 OFSS @ ₹9703.5 | ⚡ AGFS
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 74.6 / 70.08 / 62.12
+     Entry Type     : Watch
+     Entry Zone     : ₹9899.01 – ₹10048.99
+     Stop Loss      : ₹9707.48
+     Target 1       : ₹10582.04
+     Target 2       : ₹10873.56
+     Risk:Reward    : 1:1.56
+  📌 TIPSMUSIC @ ₹659.3 | ⚡ AGFS | 🚩 CORP ACTION
+     Breakout Score : 1/7
+     RSI (D/W/M)    : 63.94 / 65.83 / 60.07
+     Entry Type     : Watch
+     Entry Zone     : ₹685.18 – ₹695.56
+     Stop Loss      : ₹668.23
+     Target 1       : ₹739.83
+     Target 2       : ₹763.7
+     Risk:Reward    : 1:1.62
+
+
+🔴 MUST TRADE (Breakout + Strategy Overlap)
+------------------------------
+  🔴 [AGFS] BIOCON — ₹432.7 – ₹434.86 | SL: ₹420.95 | T1: ₹456.21 | RR: 1:1.53
+  🔴 [AGFS] LAURUSLABS — ₹1361.1 – ₹1367.91 | SL: ₹1327.74 | T1: ₹1427.81 | RR: 1:1.49
+  🔴 [AGFS] ZYDUSLIFE — ₹1082.71 – ₹1099.12 | SL: ₹1062.92 | T1: ₹1155.11 | RR: 1:1.55
+  🔴 [AGFS] HINDALCO — ₹1093.95 – ₹1110.52 | SL: ₹1075.81 | T1: ₹1163.38 | RR: 1:1.52
+  🔴 [AGFS] SAIL — ₹207.6 – ₹210.75 | SL: ₹202.64 | T1: ₹223.82 | RR: 1:1.61
+  🔴 [AGFS] VEDL — ₹337.24 – ₹342.35 | SL: ₹328.37 | T1: ₹365.21 | RR: 1:1.64
+  🔴 [AGFS] NAVINFLUOR — ₹7128.0 – ₹7236.0 | SL: ₹7005.11 | T1: ₹7589.78 | RR: 1:1.53
+  🔴 [AGFS] ADANIPOWER — ₹232.06 – ₹235.57 | SL: ₹226.1 | T1: ₹251.01 | RR: 1:1.63
+
+============================================================
+⚠️  Stocks marked 🚩 have recent corp actions; data may be unreliable
+⚠️  For informational purposes only. Trade responsibly.
+============================================================

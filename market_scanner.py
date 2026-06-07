@@ -18,6 +18,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from db import (
     test_connection,
@@ -25,8 +26,11 @@ from db import (
     get_all_stocks,
     get_stocks_by_sector,
     get_latest_trade_date,
+    get_latest_trade_dates_bulk,
+    get_quality_flagged_symbols,
     insert_daily_prices,
     fetch_prices_df,
+    fetch_prices_df_adjusted,
     get_latest_index_date,
     insert_index_prices,
     fetch_index_df,
@@ -50,17 +54,18 @@ NSE_SECTOR_INDICES = {
     "Nifty Financial Services": "NIFTY_FIN_SERVICE.NS",
     "Nifty IT":                 "^CNXIT",
     "Nifty Pharma":             "^CNXPHARMA",
-    "Nifty Healthcare":         "NIFTY_HEALTHCARE.NS",
+    "Nifty Healthcare":         "^CNXHC",
     "Nifty Auto":               "^CNXAUTO",
     "Nifty FMCG":               "^CNXFMCG",
     "Nifty Metal":              "^CNXMETAL",
     "Nifty Realty":             "^CNXREALTY",
     "Nifty Media":              "^CNXMEDIA",
-    "Nifty Chemicals":          "NIFTY_CHEM.NS",
-    "Nifty Consumer Durables":  "NIFTY_CONSR_DURBL.NS",
+    "Nifty Chemicals":          "^CNXCHEM",
+    "Nifty Consumer Durables":  "^CNXCONSDUR",
     "Nifty Energy":             "^CNXENERGY",
     "Nifty Infra":              "^CNXINFRA",
-    "Nifty Oil & Gas":          "NIFTY_OIL_AND_GAS.NS",
+    "Nifty Oil & Gas":          "^CNXOILGAS",
+    "Nifty India Defence":      "NIFTY_IND_DEFENCE.NS",
 }
 BROADER_INDICES = {"NIFTY 50": "^NSEI", "SENSEX": "^BSESN"}
 
@@ -108,6 +113,59 @@ def compute_atr(df, period=14):
 def compute_ema(series, period):
     return series.ewm(span=period, adjust=False).mean()
 
+def compute_sma(series, period):
+    """Simple moving average."""
+    return series.rolling(period).mean()
+
+
+def detect_sma_crossover(df, fast_period=21, slow_period=63, lookback=5):
+    """
+    Detect bullish SMA crossover: SMA_21 crossing ABOVE SMA_63.
+    Returns dict with:
+      - crossover: bool
+      - cross_date: pd.Timestamp or None (most recent crossover date)
+      - sma_fast_now: float (today's SMA-21)
+      - sma_slow_now: float (today's SMA-63)
+      - intersection_price: float (today's SMA-21, per user spec)
+      - diff_abs: float (current_close - intersection_price)
+      - diff_pct: float ((diff_abs / intersection_price) * 100)
+    """
+    out = {
+        "crossover": False, "cross_date": None,
+        "sma_fast_now": None, "sma_slow_now": None,
+        "intersection_price": None, "diff_abs": None, "diff_pct": None,
+    }
+
+    if len(df) < slow_period + 5:
+        return out
+
+    sma_fast = compute_sma(df['Close'], fast_period)
+    sma_slow = compute_sma(df['Close'], slow_period)
+
+    out["sma_fast_now"] = float(sma_fast.iloc[-1])
+    out["sma_slow_now"] = float(sma_slow.iloc[-1])
+    out["intersection_price"] = out["sma_fast_now"]  # user spec: today's SMA-21
+
+    current = float(df['Close'].iloc[-1])
+    out["diff_abs"] = round(current - out["intersection_price"], 2)
+    out["diff_pct"] = round((out["diff_abs"] / out["intersection_price"]) * 100, 2) \
+                      if out["intersection_price"] else None
+
+    # Bullish crossover: fast crossed above slow within the last `lookback` bars
+    # Check each pair of consecutive bars in window
+    window = df.iloc[-(lookback + 1):]
+    sma_fast_w = sma_fast.iloc[-(lookback + 1):]
+    sma_slow_w = sma_slow.iloc[-(lookback + 1):]
+
+    for i in range(1, len(window)):
+        prev_below = sma_fast_w.iloc[i-1] <= sma_slow_w.iloc[i-1]
+        now_above  = sma_fast_w.iloc[i]   >  sma_slow_w.iloc[i]
+        if prev_below and now_above:
+            out["crossover"]  = True
+            out["cross_date"] = window.index[i]
+            break
+
+    return out
 
 # ─────────────────────────────────────────────
 # PATTERNS (unchanged from v4)
@@ -167,6 +225,90 @@ def detect_elliott_wave3(df, lookback=60):
     except Exception:
         return False
 
+def label_elliott_phase(df, lookback=120):
+    """
+    Heuristic Elliott Wave phase labeling.
+    Identifies recent swing pivots and labels them W1/W2/W3/W4/W5/A/B/C.
+
+    Returns dict:
+      - current_phase: '1'|'2'|'3'|'4'|'5'|'A'|'B'|'C'|'?'
+      - phases: list of dicts {label, start_date, start_price, end_date, end_price}
+
+    HONESTY NOTE: Elliott Wave labeling is subjective. This is a peak-trough
+    heuristic, not authoritative analysis. Treat as a directional hint.
+    """
+    import numpy as np
+    out = {"current_phase": "?", "phases": []}
+    if df is None or len(df) < lookback:
+        return out
+
+    closes = df['Close'].iloc[-lookback:].values
+    dates  = df.index[-lookback:]
+
+    # Identify swing pivots using a simple zigzag (minimum 5% move filter)
+    pivots = []  # list of (idx, price, type) where type is 'H' or 'L'
+    min_move = 0.05  # 5% threshold
+
+    last_pivot_idx = 0
+    last_pivot_price = closes[0]
+    direction = None  # 'up' or 'down', set on first significant move
+
+    for i in range(1, len(closes)):
+        change = (closes[i] - last_pivot_price) / last_pivot_price
+        if direction is None:
+            if abs(change) >= min_move:
+                direction = "up" if change > 0 else "down"
+                pivots.append((last_pivot_idx, last_pivot_price, "L" if direction == "up" else "H"))
+        elif direction == "up":
+            if closes[i] > last_pivot_price:
+                last_pivot_idx, last_pivot_price = i, closes[i]
+            elif (last_pivot_price - closes[i]) / last_pivot_price >= min_move:
+                pivots.append((last_pivot_idx, last_pivot_price, "H"))
+                direction = "down"
+                last_pivot_idx, last_pivot_price = i, closes[i]
+        else:  # down
+            if closes[i] < last_pivot_price:
+                last_pivot_idx, last_pivot_price = i, closes[i]
+            elif (closes[i] - last_pivot_price) / last_pivot_price >= min_move:
+                pivots.append((last_pivot_idx, last_pivot_price, "L"))
+                direction = "up"
+                last_pivot_idx, last_pivot_price = i, closes[i]
+
+    # Always append the last point as a tentative pivot
+    pivots.append((len(closes) - 1, closes[-1],
+                   "H" if direction == "up" else "L" if direction == "down" else "?"))
+
+    if len(pivots) < 3:
+        return out
+
+    # Take the LAST up to 8 pivots and label
+    # Elliott motive: L H L H L H (5 waves) then A(L) B(H) C(L) correction
+    # We label the most recent leg as the "current phase"
+    # Simple mapping based on count and direction
+    recent = pivots[-8:] if len(pivots) >= 8 else pivots
+    labels = []
+    if len(recent) >= 6:
+        labels = ["1", "2", "3", "4", "5", "A", "B", "C"][:len(recent)-1]
+    elif len(recent) >= 4:
+        labels = ["1", "2", "3", "4", "5"][:len(recent)-1]
+    else:
+        labels = ["?"] * (len(recent) - 1)
+
+    phases = []
+    for i, label in enumerate(labels):
+        start = recent[i]
+        end   = recent[i + 1]
+        phases.append({
+            "label":       label,
+            "start_date":  dates[start[0]].date(),
+            "start_price": float(start[1]),
+            "end_date":    dates[end[0]].date(),
+            "end_price":   float(end[1]),
+        })
+
+    out["phases"] = phases
+    out["current_phase"] = labels[-1] if labels else "?"
+    return out
 
 def detect_bollinger_squeeze_breakout(df, period=20):
     try:
@@ -183,7 +325,25 @@ def detect_bollinger_squeeze_breakout(df, period=20):
     except Exception:
         return False
 
+def rsi_sma_zone(rsi_value, rsi_sma_value):
+    """
+    Return ('green'|'yellow'|'red'|None) zone for RSI vs its SMA.
+      green : RSI > RSI_SMA + 2
+      yellow: RSI_SMA - 2 <= RSI <= RSI_SMA + 2
+      red   : RSI < RSI_SMA - 2
+    """
+    if rsi_value is None or rsi_sma_value is None:
+        return None
+    diff = rsi_value - rsi_sma_value
+    if diff > 2:
+        return "green"
+    if diff < -2:
+        return "red"
+    return "yellow"
 
+
+def zone_emoji(zone):
+    return {"green": "🟢", "yellow": "🟡", "red": "🔴"}.get(zone, "⚪")
 # ─────────────────────────────────────────────
 # FIBONACCI / ENTRY
 # ─────────────────────────────────────────────
@@ -248,6 +408,28 @@ def determine_entry(df):
 # ─────────────────────────────────────────────
 # INCREMENTAL FETCH (the new piece for Phase B)
 # ─────────────────────────────────────────────
+def get_fno_flag_map():
+    """Returns {symbol: is_fno_bool} for all active stocks."""
+    from db import get_cursor
+    with get_cursor() as (_, cur):
+        cur.execute("SELECT symbol, is_fno FROM stocks WHERE is_active = TRUE")
+        return {r[0]: bool(r[1]) for r in cur.fetchall()}
+
+def get_sectors_for_symbol(symbol):
+    """
+    Return a comma-separated string of sectors this symbol belongs to.
+    Returns 'Other' if no sector mapping found.
+    """
+    from db import get_cursor
+    with get_cursor() as (_, cur):
+        cur.execute("""
+            SELECT sector FROM stock_sectors
+            WHERE symbol = %s
+            ORDER BY sector
+        """, (symbol,))
+        rows = [r[0] for r in cur.fetchall()]
+    return ", ".join(rows) if rows else "Other"
+
 def incremental_fetch_stock(symbol):
     """
     Pulls missing days from yfinance and inserts into DB.
@@ -256,7 +438,7 @@ def incremental_fetch_stock(symbol):
     latest = get_latest_trade_date(symbol)
     today  = datetime.now().date()
 
-    if latest and (today - latest).days <= 0:
+    if latest and latest>today:
         return 0  # already up-to-date
 
     # Use 5y to be safe even if last load was long ago; on conflict it's idempotent
@@ -272,7 +454,7 @@ def incremental_fetch_stock(symbol):
     df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
 
     if latest:
-        df = df[df.index.date > latest]
+        df = df[df.index.date >= latest]
         if df.empty:
             return 0
 
@@ -308,7 +490,7 @@ def incremental_fetch_index(name, ticker):
 # ─────────────────────────────────────────────
 def load_stock_data(symbol):
     """Returns (daily, weekly, monthly) DataFrames or (None, None, None)."""
-    daily = fetch_prices_df(symbol)
+    daily = fetch_prices_df_adjusted(symbol)
     if daily is None or len(daily) < 60:
         return None, None, None
 
@@ -330,16 +512,57 @@ def load_stock_data(symbol):
 # ─────────────────────────────────────────────
 # CORE SCAN
 # ─────────────────────────────────────────────
+def _is_skipped_by_quality_flag(symbol):
+    """Returns reason string if stock should be skipped, else None."""
+    from db import get_cursor
+    with get_cursor() as (_, cur):
+        cur.execute("SELECT data_quality_flag FROM stocks WHERE symbol = %s",
+                    (symbol,))
+        row = cur.fetchone()
+    if row and row[0] and row[0] != 'OK':
+        return row[0]
+    return None
+
+
 def scan_stock(symbol, flagged_set=None):
+    skip_reason = _is_skipped_by_quality_flag(symbol)
+    if skip_reason:
+        return None
     daily, weekly, monthly = load_stock_data(symbol)
     if daily is None:
         return None
 
     close_d = daily['Close']
-    rsi_daily   = float(compute_rsi(close_d).iloc[-1])
-    rsi_weekly  = float(compute_rsi(weekly['Close']).iloc[-1])
-    rsi_monthly = float(compute_rsi(monthly['Close']).iloc[-1])
 
+    # RSI series for each timeframe
+    rsi_d_series = compute_rsi(close_d)
+    rsi_w_series = compute_rsi(weekly['Close'])
+    rsi_m_series = compute_rsi(monthly['Close'])
+
+    rsi_daily   = float(rsi_d_series.iloc[-1])
+    rsi_weekly  = float(rsi_w_series.iloc[-1])
+    rsi_monthly = float(rsi_m_series.iloc[-1])
+
+    # RSI-SMA (14-period smoothing of the RSI) for each timeframe
+    rsi_d_sma = compute_sma(rsi_d_series, 14)
+    rsi_w_sma = compute_sma(rsi_w_series, 14)
+    rsi_m_sma = compute_sma(rsi_m_series, 14)
+
+    rsi_d_sma_val = float(rsi_d_sma.iloc[-1]) if not rsi_d_sma.iloc[-1] != rsi_d_sma.iloc[-1] else None
+    rsi_w_sma_val = float(rsi_w_sma.iloc[-1]) if not rsi_w_sma.iloc[-1] != rsi_w_sma.iloc[-1] else None
+    rsi_m_sma_val = float(rsi_m_sma.iloc[-1]) if not rsi_m_sma.iloc[-1] != rsi_m_sma.iloc[-1] else None
+
+    # RSI vs RSI-SMA zones for each timeframe
+    zone_d = rsi_sma_zone(rsi_daily,   rsi_d_sma_val)
+    zone_w = rsi_sma_zone(rsi_weekly,  rsi_w_sma_val)
+    zone_m = rsi_sma_zone(rsi_monthly, rsi_m_sma_val)
+    all_three_green = (zone_d == "green" and zone_w == "green" and zone_m == "green")
+
+
+    # SMA crossover (21/63 on daily)
+    sma_cross = detect_sma_crossover(daily, 21, 63)
+
+    # Breakout score (now out of 8)
     score = 0
     score_detail = {}
 
@@ -369,24 +592,49 @@ def scan_stock(symbol, flagged_set=None):
     c7 = rsi_daily > 60
     score += int(c7); score_detail["RSI>60 (Daily)"] = c7
 
+    # NEW: 8th criterion — SMA-21 crossed above SMA-63
+    c8 = bool(sma_cross["crossover"])
+    score += int(c8); score_detail["SMA 21/63 Crossover"] = c8
+
+    # 9th criterion: RSI above its 14-period SMA on ALL three timeframes (strict)
+    c9 = all_three_green
+    score += int(c9); score_detail["RSI > RSI-SMA (D+W+M)"] = c9
+
     gfs  = (rsi_monthly > 60 and rsi_weekly > 60 and 40 <= rsi_daily <= 45)
-    agfs = (rsi_monthly > 60 and rsi_weekly > 60 and rsi_daily > 60)
+    agfs = (rsi_monthly > 60 and rsi_weekly > 60 and 60 <= rsi_daily <= 65)
 
     entry = determine_entry(daily)
-    if not ((score >= 4) or gfs or agfs):
+    elliott = label_elliott_phase(daily)
+
+    # Qualifies if any of these are true (broadened to include SMA crossover by itself)
+    if not ((score >= 4) or gfs or agfs or sma_cross["crossover"]):
         return None
 
     return {
         "ticker":         symbol,
         "current_price":  f"₹{round(current, 2)}",
-        "breakout_score": f"{score}/7",
+        "current_price_raw": round(current, 2),
+        "breakout_score": f"{score}/9",
         "score_detail":   score_detail,
         "rsi_daily":      round(rsi_daily,   2),
         "rsi_weekly":     round(rsi_weekly,  2),
         "rsi_monthly":    round(rsi_monthly, 2),
-        "gfs":            gfs,
-        "agfs":           agfs,
+        "rsi_daily_sma":   round(rsi_d_sma_val, 2)   if rsi_d_sma_val is not None else None,
+        "rsi_weekly_sma":  round(rsi_w_sma_val, 2)   if rsi_w_sma_val is not None else None,
+        "rsi_monthly_sma": round(rsi_m_sma_val, 2)   if rsi_m_sma_val is not None else None,
+        "rsi_daily_zone":   zone_d,
+        "rsi_weekly_zone":  zone_w,
+        "rsi_monthly_zone": zone_m,
+        "sma_crossover": sma_cross["crossover"],
+        "sma_intersection_price": round(sma_cross["intersection_price"], 2)
+            if sma_cross["intersection_price"] is not None else None,
+        "sma_diff_abs": sma_cross["diff_abs"],
+        "sma_diff_pct": sma_cross["diff_pct"],
+        "gfs":  gfs,
+        "agfs": agfs,
         "corp_action_flag": bool(flagged_set and symbol in flagged_set),
+        "elliott_phase":  elliott["current_phase"],
+        "elliott_phases": elliott["phases"],
         **entry,
     }
 
@@ -409,6 +657,44 @@ def get_market_direction():
         macd_l, sig_l, _ = compute_macd(close)
         macd_bull = float(macd_l.iloc[-1]) > float(sig_l.iloc[-1])
 
+        # Week-on-week and month-on-month % changes
+        # We approximate: 5 trading days ≈ 1 week, 21 trading days ≈ 1 month
+        def _pct_change(idx_back):
+            if len(close) <= idx_back:
+                return None
+            past = float(close.iloc[-(idx_back + 1)])
+            return ((current - past) / past) * 100 if past else None
+
+        # Period-based comparisons:
+        #   prev_week_close = close on last trading day of previous calendar week
+        #   curr_close      = today's close (last row of daily series)
+        #   prev_month_close = close on last trading day of previous calendar month
+        # Trend arrow per period: ⬆️ if end > start, ⬇️ if end < start, ➡️ if equal
+        # Where "start" = close at end of PREVIOUS period, "end" = close at end of THIS period
+
+        # Resample daily to weekly close (last close of each calendar week)
+        weekly_closes  = close.resample("W").last().dropna()
+        monthly_closes = close.resample("ME").last().dropna()
+
+        def _arrow(end_val, start_val):
+            if end_val is None or start_val is None:
+                return "➡️"
+            if end_val > start_val:  return "⬆️"
+            if end_val < start_val:  return "⬇️"
+            return "➡️"
+
+        # LAST WEEK: completed week (the second-to-last row when running mid-week)
+        # In pandas, the last entry in weekly_closes is "current week so far" if today
+        # isn't Friday, OR the completed current week if today is Friday.
+        # Either way: index -1 = current period, index -2 = previous completed period.
+        last_week_close = float(weekly_closes.iloc[-2]) if len(weekly_closes) >= 2 else None
+        prev_week_close = float(weekly_closes.iloc[-3]) if len(weekly_closes) >= 3 else None
+        last_month_close = float(monthly_closes.iloc[-2]) if len(monthly_closes) >= 2 else None
+        prev_month_close = float(monthly_closes.iloc[-3]) if len(monthly_closes) >= 3 else None
+
+        this_week_close  = float(weekly_closes.iloc[-1]) if len(weekly_closes) else None
+        this_month_close = float(monthly_closes.iloc[-1]) if len(monthly_closes) else None
+
         bull_points = sum([
             current > ema50,
             (current > ema200) if ema200 else True,
@@ -421,43 +707,94 @@ def get_market_direction():
             direction = "➡️ Neutral"
         else:
             direction = "📉 Bearish"
+
         results[name] = {
-            "direction": direction,
-            "price": round(current, 2),
-            "rsi": round(rsi, 2),
+            "direction":         direction,
+            "price":             round(current, 2),
+            "rsi":               round(rsi, 2),
+            # Previous completed week: prev_week_close → last_week_close
+            "last_week":  {
+                "start_close": round(prev_week_close, 2) if prev_week_close is not None else None,
+                "end_close":   round(last_week_close, 2) if last_week_close is not None else None,
+                "arrow":       _arrow(last_week_close, prev_week_close),
+            },
+            # Current (in-progress) week: last_week_close → this_week_close
+            "this_week":  {
+                "start_close": round(last_week_close, 2) if last_week_close is not None else None,
+                "end_close":   round(this_week_close, 2) if this_week_close is not None else None,
+                "arrow":       _arrow(this_week_close, last_week_close),
+                "in_progress": True,
+            },
+            "last_month": {
+                "start_close": round(prev_month_close, 2) if prev_month_close is not None else None,
+                "end_close":   round(last_month_close, 2) if last_month_close is not None else None,
+                "arrow":       _arrow(last_month_close, prev_month_close),
+            },
+            "this_month": {
+                "start_close": round(last_month_close, 2) if last_month_close is not None else None,
+                "end_close":   round(this_month_close, 2) if this_month_close is not None else None,
+                "arrow":       _arrow(this_month_close, last_month_close),
+                "in_progress": True,
+            },
         }
     return results
 
 
 def scan_sector_direction():
+    """
+    New sector classification (RSI-based, week-over-week):
+      • Last completed week's Friday RSI > 60 AND this week's current RSI > last week's → 🟢 Bullish
+      • Last completed week's RSI > 60 AND this week's RSI <= last week's → 🟡 Amber (cooling)
+      • Last completed week's RSI <= 60 → 🔴 Bearish
+    """
     out = {}
     for sector in NSE_SECTOR_INDICES.keys():
         df = fetch_index_df(sector)
+        source = "real"
         if df is None or len(df) < 30:
-            out[sector] = {"status": "Data Unavailable", "rsi": 0}
+            df = fetch_index_df(sector + " (synth)")
+            source = "synth"
+        if df is None or len(df) < 30:
+            out[sector] = {"status": "Data Unavailable", "rsi": 0, "source": "none"}
             continue
-        close   = df['Close']
-        current = float(close.iloc[-1])
-        ema20   = float(compute_ema(close, 20).iloc[-1])
-        ema50   = float(compute_ema(close, 50).iloc[-1]) if len(close) >= 50 else ema20
-        rsi     = float(compute_rsi(close).iloc[-1])
-        _, _, hist = compute_macd(close)
-        breakout = current > float(close.iloc[-50:].max() * 0.99) if len(close) >= 50 else False
 
-        bull_points = sum([
-            current > ema20,
-            current > ema50,
-            rsi > 55,
-            float(hist.iloc[-1]) > 0,
-            breakout,
-        ])
-        if bull_points >= 3:
+        close = df['Close']
+
+        # Resample to weekly (Mon–Fri grouped on Friday close)
+        weekly = df.resample("W").agg({
+            "Open": "first", "High": "max", "Low": "min",
+            "Close": "last",
+        }).dropna()
+
+        if len(weekly) < 20:
+            # Fall back to daily RSI based status
+            rsi = float(compute_rsi(close).iloc[-1])
+            out[sector] = {"status": "Insufficient", "rsi": round(rsi, 2), "source": source,
+                           "rsi_last_week": None, "rsi_this_week": None}
+            continue
+
+        rsi_weekly = compute_rsi(weekly['Close'])
+        # The current-week row is the most recent in `weekly` (its Close is the
+        # latest available daily close — i.e., "this week so far").
+        rsi_this_week = float(rsi_weekly.iloc[-1])
+        rsi_last_week = float(rsi_weekly.iloc[-2]) if len(rsi_weekly) >= 2 else None
+
+        if rsi_last_week is None:
+            status = "Insufficient"
+        elif rsi_last_week > 60 and rsi_this_week > rsi_last_week:
             status = "Bullish Breakout"
-        elif bull_points == 2:
-            status = "Neutral"
+        elif rsi_last_week > 60 and rsi_this_week <= rsi_last_week:
+            status = "Cooling (Amber)"
         else:
             status = "Bearish"
-        out[sector] = {"status": status, "rsi": round(rsi, 2)}
+
+        out[sector] = {
+            "status":         status,
+            "rsi":            round(rsi_this_week, 2),    # backward-compat
+            "rsi_last_week":  round(rsi_last_week, 2) if rsi_last_week is not None else None,
+            "rsi_this_week":  round(rsi_this_week, 2),
+            "source":         source,
+        }
     return out
 
 
@@ -467,6 +804,9 @@ def scan_sector_direction():
 def run_full_scan():
     print("\n" + "="*60)
     print("  NSE F&O MARKET SCANNER (DB-backed)")
+    import time as _time
+    _t0 = _time.time()
+    _stage_times = {}
     print(f"  {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
     print("="*60)
 
@@ -483,7 +823,8 @@ def run_full_scan():
     flagged     = get_flagged_symbols()
     flagged_set = {f["symbol"] for f in flagged}
     quarantined = get_quarantined_symbols()
-    upcoming_7d = get_upcoming_actions(days_ahead=7)
+    upcoming_14d = get_upcoming_actions(days_ahead=14)
+    _stage_times["corp_actions"] = _time.time() - _t0
 
     # [1] Incremental fetch — indices
     print("\n[1/5] Incremental fetch: indices...")
@@ -495,25 +836,55 @@ def run_full_scan():
             idx_updated += r
         time.sleep(random.uniform(0.3, 0.7))
     print(f"   ✅ Indices: {idx_updated} new rows")
+    _stage_times["incremental_indices"] = _time.time() - _t0
 
     # [2] Incremental fetch — stocks
+    # [2] Incremental fetch — stocks (only fetch when behind)
     print("\n[2/5] Incremental fetch: stocks...")
     all_symbols = get_all_stocks(active_only=True)
-    stock_updates = 0
+    fno_map = get_fno_flag_map()
+
+    # Skip stocks flagged with quality issues (e.g., LTM with insufficient history)
+    flagged_bad = get_quality_flagged_symbols()
+    if flagged_bad:
+        print(f"   ⏭️  Skipping {len(flagged_bad)} flagged stocks: "
+              f"{', '.join(sorted(flagged_bad))}")
+
+    # Bulk lookup of latest dates — one query instead of 200
+    today = datetime.now().date()
+    latest_dates = get_latest_trade_dates_bulk(all_symbols)
+
+    needs_update = []
     for sym in all_symbols:
-        if sym in quarantined:
+        if sym in quarantined or sym in flagged_bad:
             continue
-        r = incremental_fetch_stock(sym)
-        if r:
-            stock_updates += r
-        time.sleep(random.uniform(0.2, 0.5))
-    print(f"   ✅ Stocks: {stock_updates} new rows across {len(all_symbols)} symbols")
+        latest = latest_dates.get(sym)
+        if latest is None or latest<=today:
+            needs_update.append(sym)
+
+    print(f"   ℹ️  {len(all_symbols) - len(needs_update)} up-to-date, "
+          f"{len(needs_update)} need fetch")
+
+    stock_updates = 0
+    if needs_update:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(incremental_fetch_stock, s): s for s in needs_update}
+            for f in as_completed(futures):
+                try:
+                    r = f.result()
+                    if r:
+                        stock_updates += r
+                except Exception as e:
+                    print(f"   ⚠️  Fetch error for {futures[f]}: {e}")
+    print(f"   ✅ Stocks: {stock_updates} new rows")
+    _stage_times["incremental_stocks"] = _time.time() - _t0
 
     # [3] Market & sectors
     print("\n[3/5] Scanning NIFTY/SENSEX + sectors...")
     market  = get_market_direction()
     sectors = scan_sector_direction()
     bullish_sectors = [s for s, v in sectors.items() if v.get("status") == "Bullish Breakout"]
+    _stage_times["market_sectors"] = _time.time() - _t0
 
     # [4] Stock scans
     print(f"\n[4/5] Scanning stocks in {len(bullish_sectors)} bullish sectors...")
@@ -527,43 +898,73 @@ def run_full_scan():
         "must_trade_gfs":  [],
         "must_trade_agfs": [],
         "corp_actions_flagged":     flagged,
-        "corp_actions_upcoming_7d": upcoming_7d,
+        "corp_actions_upcoming_14d": upcoming_14d,
         "quarantined":     sorted(quarantined),
     }
 
     all_scanned = {}
+    # Build the set of all unique symbols to scan in bullish sectors (dedup across overlapping sectors)
+    sector_to_stocks = {}
+    unique_to_scan = set()
     for sector in bullish_sectors:
         stocks = get_stocks_by_sector(sector)
-        hits = []
+        sector_to_stocks[sector] = stocks
         for sym in stocks:
-            if sym in quarantined:
+            if sym in quarantined or sym in flagged_bad:
                 continue
-            if sym in all_scanned:
-                if all_scanned[sym]:
-                    hits.append(all_scanned[sym])
-                continue
-            r = scan_stock(sym, flagged_set)
-            if r:
-                all_scanned[sym] = {"sector": sector, **r}
+            unique_to_scan.add(sym)
+
+    # Parallel scan
+    if unique_to_scan:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(scan_stock, s, flagged_set): s for s in unique_to_scan}
+            for f in as_completed(futures):
+                sym = futures[f]
+                try:
+                    r = f.result()
+                    all_scanned[sym] = r
+                    if r:
+                        all_scanned[sym]["is_fno"] = fno_map.get(sym, True)
+                except Exception as e:
+                    print(f"   ⚠️  Scan error for {sym}: {e}")
+                    all_scanned[sym] = None
+
+    # Now build the per-sector top-3 lists from the scanned results
+    for sector in bullish_sectors:
+        hits = []
+        for sym in sector_to_stocks.get(sector, []):
+            r = all_scanned.get(sym)
+            if r and not (sym in quarantined or sym in flagged_bad):
+                # Attach the sector this hit came from (a stock can be in multiple sectors,
+                # but we display it under whichever sector first led to its inclusion)
+                if "sector" not in r:
+                    r = {"sector": sector, **r}
+                    all_scanned[sym] = r
+                    if r:
+                        all_scanned[sym]["is_fno"] = fno_map.get(sym, True)
                 hits.append(r)
-            else:
-                all_scanned[sym] = None
-        valid = [h for h in hits if h]
-        valid.sort(key=lambda x: int(x["breakout_score"].split("/")[0]), reverse=True)
-        if valid:
-            results["breakout_stocks"][sector] = valid[:3]
+        hits.sort(key=lambda x: int(x["breakout_score"].split("/")[0]), reverse=True)
+        if hits:
+            results["breakout_stocks"][sector] = hits[:3]
+    _stage_times["stock_scan_loop"] = _time.time() - _t0
 
     # GFS/AGFS scan across remaining symbols
     print("\n[5/5] Remaining GFS/AGFS scan...")
-    for sym in all_symbols:
-        if sym in all_scanned or sym in quarantined:
-            continue
-        r = scan_stock(sym, flagged_set)
-        if r:
-            # Find any sector membership (just for display)
-            with __import__("contextlib").suppress(Exception):
-                pass
-            all_scanned[sym] = {"sector": "Other", **r}
+    remaining = [s for s in all_symbols
+                 if s not in all_scanned and s not in quarantined and s not in flagged_bad]
+
+    if remaining:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(scan_stock, s, flagged_set): s for s in remaining}
+            for f in as_completed(futures):
+                sym = futures[f]
+                try:
+                    r = f.result()
+                    if r:
+                        all_scanned[sym] = {"sector": get_sectors_for_symbol(sym), **r, "is_fno": fno_map.get(sym, True)}
+                except Exception as e:
+                    print(f"   ⚠️  Scan error for {sym}: {e}")
+    _stage_times["gfsagfs_calc_loop"] = _time.time() - _t0
 
     breakout_tickers = {
         s["ticker"] for stocks in results["breakout_stocks"].values() for s in stocks
@@ -605,28 +1006,87 @@ def run_full_scan():
                    stocks_processed=len(all_symbols),
                    signals_found=saved)
 
+    total = _time.time() - _t0
+    print("\n⏱  TIMING")
+    last = 0
+    for stage, t in _stage_times.items():
+        elapsed = t - last
+        print(f"   {stage:<25} {elapsed:>7.1f}s  (cumulative {t:>7.1f}s)")
+        last = t
+    print(f"   {'TOTAL':<25} {total:>7.1f}s")
     return results
 
 
 # ─────────────────────────────────────────────
 # FORMATTER
 # ─────────────────────────────────────────────
-def format_stock_block(stock):
-    gfs_badge  = " | 🎯 GFS"  if stock.get("gfs")  else ""
-    agfs_badge = " | ⚡ AGFS" if stock.get("agfs") else ""
-    ca_warn    = " | 🚩 CORP ACTION" if stock.get("corp_action_flag") else ""
+def format_stock_block(stock, criteria_list=None):
+    """
+    Render a stock block. criteria_list = top-line badges (strategic outcomes).
+    Sub-criteria (which mechanical conditions passed) are shown on a separate line.
+    """
+    seg_badge = "" if stock.get("is_fno", True) else " | 📈 INV"
+    ca_warn   = " | 🚩 CORP ACTION" if stock.get("corp_action_flag") else ""
 
-    return "\n".join([
-        f"  📌 {stock['ticker']} @ {stock['current_price']}{gfs_badge}{agfs_badge}{ca_warn}",
+    badges = " | ".join(criteria_list) if criteria_list else ""
+    badges_str = f" | {badges}" if badges else ""
+
+    lines = [
+        f"  📌 {stock['ticker']} @ {stock['current_price']}{badges_str}{ca_warn}{seg_badge}",
         f"     Breakout Score : {stock['breakout_score']}",
-        f"     RSI (D/W/M)    : {stock['rsi_daily']} / {stock['rsi_weekly']} / {stock['rsi_monthly']}",
-        f"     Entry Type     : {stock['entry_type']}",
-        f"     Entry Zone     : {stock['entry_zone']}",
-        f"     Stop Loss      : {stock['stop_loss']}",
-        f"     Target 1       : {stock['target1']}",
-        f"     Target 2       : {stock['target2']}",
-        f"     Risk:Reward    : 1:{stock['rr_ratio']}",
-    ])
+    ]
+
+    # NEW: Criteria Met line — list the sub-criteria that passed
+    # Pulls from the score_detail dict that scan_stock() populates
+    score_detail = stock.get("score_detail", {})
+    if score_detail:
+        passed = [name for name, ok in score_detail.items() if ok]
+        if passed:
+            # Short, readable list
+            lines.append(f"     Criteria Met   : {', '.join(passed)}")
+
+    # Color-coded RSI display based on RSI-SMA zones
+    zd = stock.get("rsi_daily_zone")
+    zw = stock.get("rsi_weekly_zone")
+    zm = stock.get("rsi_monthly_zone")
+    emoji_d = zone_emoji(zd)
+    emoji_w = zone_emoji(zw)
+    emoji_m = zone_emoji(zm)
+
+    lines.append(
+        f"     RSI (D/W/M)    : {emoji_d} {stock['rsi_daily']} / "
+        f"{emoji_w} {stock['rsi_weekly']} / "
+        f"{emoji_m} {stock['rsi_monthly']}"
+    )
+    d_sma = stock.get("rsi_daily_sma")
+    w_sma = stock.get("rsi_weekly_sma")
+    m_sma = stock.get("rsi_monthly_sma")
+    if any(v is not None for v in [d_sma, w_sma, m_sma]):
+        def _v(x): return f"{x}" if x is not None else "—"
+        lines.append(f"     RSI-SMA(14)    : {_v(d_sma)} / {_v(w_sma)} / {_v(m_sma)}")
+
+    # SMA crossover info if present
+    if stock.get("sma_crossover"):
+        inter = stock.get("sma_intersection_price")
+        diff_abs = stock.get("sma_diff_abs")
+        diff_pct = stock.get("sma_diff_pct")
+        sign_abs = f"{diff_abs:+.2f}" if diff_abs is not None else "—"
+        sign_pct = f"{diff_pct:+.2f}%" if diff_pct is not None else "—"
+        lines.append(f"     SMA 21 Cross   : ₹{inter}  (Δ {sign_abs} / {sign_pct})")
+
+    # Elliott Wave (heuristic)
+    elliott_phase  = stock.get("elliott_phase")
+    elliott_phases = stock.get("elliott_phases", [])
+    if elliott_phase and elliott_phase != "?":
+        lines.append(f"     Elliott Wave   : currently in phase {elliott_phase}")
+        for p in elliott_phases:
+            lines.append(
+                f"        W{p['label']}: {p['start_date']} ₹{p['start_price']:.2f} "
+                f"→ {p['end_date']} ₹{p['end_price']:.2f}"
+            )
+    # lines.extend([
+    # ])
+    return "\n".join(lines)
 
 
 def format_results(results):
@@ -637,24 +1097,24 @@ def format_results(results):
         "=" * 60,
     ]
 
-    if results.get("corp_actions_flagged"):
-        lines.append("\n🚩 CORPORATE ACTION FLAGS (review recommended)")
-        lines.append("-" * 60)
-        for f in results["corp_actions_flagged"]:
-            lines.append(f"  {f['symbol']:<15} | {f['action_type']:<10} | ex-date: {f['ex_date']:<12}")
-            if f.get("details"):
-                lines.append(f"      {f['details'][:80]}")
-        lines.append("-" * 60)
+    # if results.get("corp_actions_flagged"):
+    #     lines.append("\n🚩 CORPORATE ACTION FLAGS (review recommended)")
+    #     lines.append("-" * 60)
+    #     for f in results["corp_actions_flagged"]:
+    #         lines.append(f"  {f['symbol']:<15} | {f['action_type']:<10} | ex-date: {f['ex_date']:<12}")
+    #         if f.get("details"):
+    #             lines.append(f"      {f['details'][:80]}")
+    #     lines.append("-" * 60)
 
-    if results.get("corp_actions_upcoming_7d"):
-        lines.append("\n📅 UPCOMING CORP ACTIONS (next 7 days)")
-        lines.append("-" * 60)
-        for u in results["corp_actions_upcoming_7d"]:
-            risky = " 🚩" if u.get("is_risky") else ""
-            lines.append(f"  {u['ex_date']:<12} | {u['symbol']:<12} | {u['action_type']:<10}{risky}")
-            if u.get("details"):
-                lines.append(f"      {u['details'][:80]}")
-        lines.append("-" * 60)
+    # if results.get("corp_actions_upcoming_14d"):
+    #     lines.append("\n📅 UPCOMING CORP ACTIONS (next 14 days)")
+    #     lines.append("-" * 60)
+    #     for u in results["corp_actions_upcoming_14d"]:
+    #         risky = " 🚩" if u.get("is_risky") else ""
+    #         lines.append(f"  {u['ex_date']:<12} | {u['symbol']:<12} | {u['action_type']:<10}{risky}")
+    #         if u.get("details"):
+    #             lines.append(f"      {u['details'][:80]}")
+    #     lines.append("-" * 60)
 
     if results.get("quarantined"):
         lines.append(f"\n⏸️  QUARANTINED: {', '.join(results['quarantined'])}")
@@ -664,52 +1124,131 @@ def format_results(results):
     for idx, data in results["market"].items():
         if isinstance(data, dict):
             lines.append(f"  {idx}: {data['direction']}  |  Price: {data['price']}  |  RSI: {data['rsi']}")
+
+            def _fmt_period(label, period_data, suffix=""):
+                if not period_data:
+                    return f"     {label:<11}: data unavailable"
+                s = period_data.get("start_close")
+                e = period_data.get("end_close")
+                a = period_data.get("arrow", "➡️")
+                if s is None or e is None:
+                    return f"     {label:<11}: data unavailable"
+                return f"     {label:<11}: {a} {s:,.2f} → {e:,.2f}{suffix}"
+
+            lines.append(_fmt_period("Last week",  data.get("last_week")))
+            lines.append(_fmt_period("This week",  data.get("this_week"),  " (in progress)"))
+            lines.append(_fmt_period("Last month", data.get("last_month")))
+            lines.append(_fmt_period("This month", data.get("this_month"), " (in progress)"))
         else:
             lines.append(f"  {idx}: {data}")
 
-    lines.append("\n📂 SECTOR STATUS")
+    lines.append("\n📂 SECTOR STATUS (Weekly RSI momentum)")
     lines.append("-" * 30)
+    status_emoji = {
+        "Bullish Breakout": "🟢",
+        "Cooling (Amber)":  "🟡",
+        "Bearish":          "🔴",
+        "Insufficient":     "⚪",
+        "Data Unavailable": "⚪",
+    }
     for sector, data in results["sectors"].items():
         if isinstance(data, dict):
             status = data.get("status", "Unknown")
-            emoji = {"Bullish Breakout": "🟢", "Neutral": "🟡", "Bearish": "🔴"}.get(status, "⚪")
-            lines.append(f"  {emoji} {sector}: {status}  (RSI: {data.get('rsi', 'N/A')})")
+            emoji = status_emoji.get(status, "⚪")
+            src   = data.get("source", "?")
+            src_marker = "" if src == "real" else f" [{src}]"
+            lw = data.get("rsi_last_week")
+            tw = data.get("rsi_this_week")
+            if lw is not None and tw is not None:
+                lines.append(
+                    f"  {emoji} {sector}{src_marker}: {status}  "
+                    f"(LW RSI: {lw} → TW RSI: {tw})"
+                )
+            else:
+                lines.append(f"  {emoji} {sector}{src_marker}: {status}")
 
-    if results["breakout_stocks"]:
-        lines.append("\n🚀 BREAKOUT SECTOR STOCKS (Top 3/sector)")
-        lines.append("-" * 30)
-        for sector, stocks in results["breakout_stocks"].items():
-            lines.append(f"\n  [{sector}]")
-            for stock in stocks:
-                lines.append(format_stock_block(stock))
-    else:
-        lines.append("\n🚀 BREAKOUT STOCKS: None today")
+    # ─────────────────────────────────────────────
+    # UNIFIED DISPLAY: dedup stocks, segregate by F&O / Investment,
+    # show all matched criteria as badges
+    # ─────────────────────────────────────────────
+    def _build_badges(stock):
+        """Return list of badge strings based on what criteria the stock matched."""
+        badges = []
+        if stock.get("gfs"):                  badges.append("🎯 GFS")
+        if stock.get("agfs"):                 badges.append("⚡ AGFS")
+        if stock.get("sma_crossover"):        badges.append("📊 SMA Crossover")
+        # Sector Breakout: the stock appears in results["breakout_stocks"]
+        if stock["ticker"] in breakout_set:   badges.append("🚀 Sector Breakout")
+        # Must Trade: combined criterion
+        if stock["ticker"] in must_trade_set: badges.append("🔴 MUST TRADE")
+        return badges
 
-    if results["gfs_stocks"]:
-        lines.append("\n\n🎯 GFS STRATEGY PICKS")
-        lines.append("-" * 30)
-        for stock in results["gfs_stocks"]:
-            lines.append(format_stock_block(stock))
-    else:
-        lines.append("\n\n🎯 GFS PICKS: None today")
+    # Build the index sets
+    breakout_set = {
+        s["ticker"]
+        for stocks in results["breakout_stocks"].values()
+        for s in stocks
+    }
+    must_trade_set = (
+        {s["ticker"] for s in results["must_trade_gfs"]}
+        | {s["ticker"] for s in results["must_trade_agfs"]}
+    )
 
-    if results["agfs_stocks"]:
-        lines.append("\n\n⚡ AGFS STRATEGY PICKS")
-        lines.append("-" * 30)
-        for stock in results["agfs_stocks"]:
-            lines.append(format_stock_block(stock))
-    else:
-        lines.append("\n\n⚡ AGFS PICKS: None today")
+    # Collect ALL unique qualifying stocks
+    all_stocks = {}  # ticker -> stock dict (with highest score variant)
+    sources = (
+        list(results.get("gfs_stocks", [])) +
+        list(results.get("agfs_stocks", []))
+    )
+    for stocks_in_sector in results["breakout_stocks"].values():
+        sources.extend(stocks_in_sector)
 
-    if results["must_trade_gfs"] or results["must_trade_agfs"]:
-        lines.append("\n\n🔴 MUST TRADE (Breakout + Strategy Overlap)")
-        lines.append("-" * 30)
-        for stock in results["must_trade_gfs"]:
-            lines.append(f"  🔴 [GFS] {stock['ticker']} — {stock['entry_zone']} | SL: {stock['stop_loss']} | T1: {stock['target1']} | RR: 1:{stock['rr_ratio']}")
-        for stock in results["must_trade_agfs"]:
-            lines.append(f"  🔴 [AGFS] {stock['ticker']} — {stock['entry_zone']} | SL: {stock['stop_loss']} | T1: {stock['target1']} | RR: 1:{stock['rr_ratio']}")
+    for s in sources:
+        t = s["ticker"]
+        if t not in all_stocks:
+            all_stocks[t] = s
+        else:
+            # Keep the variant with the highest score (they should match anyway)
+            try:
+                curr = int(all_stocks[t]["breakout_score"].split("/")[0])
+                new  = int(s["breakout_score"].split("/")[0])
+                if new > curr:
+                    all_stocks[t] = s
+            except Exception:
+                pass
+
+    # Split by F&O vs Investment
+    fno_stocks = [s for s in all_stocks.values() if s.get("is_fno", True)]
+    inv_stocks = [s for s in all_stocks.values() if not s.get("is_fno", True)]
+
+    # Sort each by breakout score descending, then ticker
+    def _score(s):
+        try: return int(s["breakout_score"].split("/")[0])
+        except: return 0
+    fno_stocks.sort(key=lambda s: (-_score(s), s["ticker"]))
+    inv_stocks.sort(key=lambda s: (-_score(s), s["ticker"]))
+
+    # Render TRADING (F&O)
+    lines.append("\n\n" + "=" * 60)
+    lines.append(f"⚡ TRADING CANDIDATES (F&O — leveraged + short-sellable) — {len(fno_stocks)}")
+    lines.append("=" * 60)
+    if fno_stocks:
+        for s in fno_stocks:
+            lines.append(format_stock_block(s, criteria_list=_build_badges(s)))
+            lines.append("")  # spacing
     else:
-        lines.append("\n\n🔴 MUST TRADE: None today")
+        lines.append("\n   No qualifying F&O stocks today.")
+
+    # Render INVESTMENT (non-F&O)
+    lines.append("\n\n" + "=" * 60)
+    lines.append(f"📈 INVESTMENT CANDIDATES (NIFTY 500 ex-F&O — long-only) — {len(inv_stocks)}")
+    lines.append("=" * 60)
+    if inv_stocks:
+        for s in inv_stocks:
+            lines.append(format_stock_block(s, criteria_list=_build_badges(s)))
+            lines.append("")
+    else:
+        lines.append("\n   No qualifying investment stocks today.")
 
     lines.append("\n" + "=" * 60)
     lines.append("⚠️  Stocks marked 🚩 have recent corp actions; data may be unreliable")
@@ -721,8 +1260,32 @@ def format_results(results):
 # ─────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────
+def format_corp_action_report(results):
+    """Standalone corp action report for Monday emissions."""
+    lines = [
+        "=" * 60,
+        "📅 CORPORATE ACTIONS — NEXT 14 DAYS",
+        datetime.now().strftime("Generated %d %b %Y | %I:%M %p"),
+        "=" * 60,
+    ]
+    upcoming = results.get("corp_actions_upcoming_14d", [])
+    if not upcoming:
+        lines.append("\n   No corporate actions in the next 14 days.")
+    else:
+        lines.append(f"\n   {len(upcoming)} action(s) in the next 14 days:\n")
+        lines.append("-" * 60)
+        for u in upcoming:
+            risky = " 🚩" if u.get("is_risky") else ""
+            lines.append(f"  {u['ex_date']:<12} | {u['symbol']:<14} | {u['action_type']:<10}{risky}")
+            if u.get("details"):
+                lines.append(f"      {u['details'][:80]}")
+        lines.append("-" * 60)
+
+    lines.append("\n" + "=" * 60)
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
-    # Sanity-check DB
     try:
         test_connection()
     except Exception as e:
@@ -734,7 +1297,19 @@ if __name__ == "__main__":
     print("\n\n")
     print(report)
 
-    filename = f"scan_result_{datetime.now().strftime('%d_%b_%Y')}.txt"
-    with open(filename, "w", encoding="utf-8") as f:
+    # Daily scan output
+    daily_name = f"scan_result_{datetime.now().strftime('%d_%b_%Y')}.txt"
+    with open(daily_name, "w", encoding="utf-8") as f:
         f.write(report)
-    print(f"\n✅ Report saved to {filename}")
+    print(f"\n✅ Daily report saved to {daily_name}")
+
+    # Monday-only corp actions output
+    today = datetime.now()
+    if today.weekday() == 0:   # Monday
+        corp_name = f"corp_actions_{today.strftime('%d_%b_%Y')}.txt"
+        with open(corp_name, "w", encoding="utf-8") as f:
+            f.write(format_corp_action_report(results))
+        print(f"📅 Monday corp actions report saved to {corp_name}")
+    else:
+        days_until_monday = (7 - today.weekday()) % 7 or 7
+        print(f"ℹ️  Corp action report runs on Mondays (next in {days_until_monday} day(s))")
