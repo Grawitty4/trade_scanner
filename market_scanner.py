@@ -243,11 +243,10 @@ def detect_negative_divergence(df, rsi_series, lookback=21):
     # Higher high in price, lower high in RSI → ND observed
     if p2 > p1 and r2 < r1:
         out["status"] = "observed"
-        # Active iff today's close < yesterday's close
         if len(df) >= 2:
             today_close = float(df['Close'].iloc[-1])
-            prev_close  = float(df['Close'].iloc[-2])
-            if today_close < prev_close:
+            prev_low    = float(df['Low'].iloc[-2])
+            if today_close < prev_low:
                 out["status"] = "active"
 
     return out
