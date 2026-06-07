@@ -19,6 +19,15 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def now_ist():
+    """Return current datetime in IST (Indian Standard Time)."""
+    return datetime.now(IST)
+
 
 from db import (
     test_connection,
@@ -167,6 +176,82 @@ def detect_sma_crossover(df, fast_period=21, slow_period=63, lookback=5):
 
     return out
 
+def detect_negative_divergence(df, rsi_series, lookback=21):
+    """
+    Detect Negative Divergence (ND) on the given timeframe:
+      • In the last `lookback` bars, identify the two highest PRICE peaks
+        (chronologically). If the later peak has HIGHER price than the earlier one,
+        that's a "higher high" in price.
+      • Check the RSI values AT those same two peak dates. If RSI at the later
+        peak is LOWER than at the earlier peak, that's a "lower high" in RSI.
+      • Both conditions together = Negative Divergence is OBSERVED.
+      • If additionally today's close < yesterday's close → ND is ACTIVE.
+
+    Returns dict:
+      - status: 'none' | 'observed' | 'active'
+      - peak1_date, peak1_price, peak1_rsi
+      - peak2_date, peak2_price, peak2_rsi
+    """
+    import numpy as np
+    out = {
+        "status": "none",
+        "peak1_date": None, "peak1_price": None, "peak1_rsi": None,
+        "peak2_date": None, "peak2_price": None, "peak2_rsi": None,
+    }
+    if df is None or len(df) < lookback + 2 or rsi_series is None:
+        return out
+
+    window = df.iloc[-lookback:]
+    rsi_window = rsi_series.iloc[-lookback:]
+    if rsi_window.dropna().empty:
+        return out
+
+    highs = window['High'].values
+    dates = window.index
+
+    # Find top-2 highs in the window. Require at least 3 bars apart so we
+    # don't pick the same "peak" twice.
+    sorted_idx_by_high = sorted(range(len(highs)), key=lambda i: highs[i], reverse=True)
+    if len(sorted_idx_by_high) < 2:
+        return out
+
+    top1 = sorted_idx_by_high[0]
+    top2 = None
+    for cand in sorted_idx_by_high[1:]:
+        if abs(cand - top1) >= 3:  # min separation
+            top2 = cand
+            break
+    if top2 is None:
+        return out
+
+    # Order chronologically: earlier index first
+    a, b = (top1, top2) if top1 < top2 else (top2, top1)
+    p1, p2 = float(highs[a]), float(highs[b])
+    r1 = float(rsi_window.iloc[a]) if not np.isnan(rsi_window.iloc[a]) else None
+    r2 = float(rsi_window.iloc[b]) if not np.isnan(rsi_window.iloc[b]) else None
+
+    if r1 is None or r2 is None:
+        return out
+
+    out["peak1_date"]  = dates[a].date()
+    out["peak1_price"] = round(p1, 2)
+    out["peak1_rsi"]   = round(r1, 2)
+    out["peak2_date"]  = dates[b].date()
+    out["peak2_price"] = round(p2, 2)
+    out["peak2_rsi"]   = round(r2, 2)
+
+    # Higher high in price, lower high in RSI → ND observed
+    if p2 > p1 and r2 < r1:
+        out["status"] = "observed"
+        # Active iff today's close < yesterday's close
+        if len(df) >= 2:
+            today_close = float(df['Close'].iloc[-1])
+            prev_close  = float(df['Close'].iloc[-2])
+            if today_close < prev_close:
+                out["status"] = "active"
+
+    return out
+
 # ─────────────────────────────────────────────
 # PATTERNS (unchanged from v4)
 # ─────────────────────────────────────────────
@@ -225,90 +310,158 @@ def detect_elliott_wave3(df, lookback=60):
     except Exception:
         return False
 
-def label_elliott_phase(df, lookback=120):
+def _try_elliott_at_lookback(df, lookback):
     """
-    Heuristic Elliott Wave phase labeling.
-    Identifies recent swing pivots and labels them W1/W2/W3/W4/W5/A/B/C.
-
-    Returns dict:
-      - current_phase: '1'|'2'|'3'|'4'|'5'|'A'|'B'|'C'|'?'
-      - phases: list of dicts {label, start_date, start_price, end_date, end_price}
-
-    HONESTY NOTE: Elliott Wave labeling is subjective. This is a peak-trough
-    heuristic, not authoritative analysis. Treat as a directional hint.
+    Single-attempt Elliott labeler at a given lookback.
+    Returns (current_phase, phases_list, validation_failed_bool, violations_list).
     """
     import numpy as np
-    out = {"current_phase": "?", "phases": []}
     if df is None or len(df) < lookback:
-        return out
+        return "?", [], True, ["insufficient_data"]
 
     closes = df['Close'].iloc[-lookback:].values
     dates  = df.index[-lookback:]
 
-    # Identify swing pivots using a simple zigzag (minimum 5% move filter)
-    pivots = []  # list of (idx, price, type) where type is 'H' or 'L'
-    min_move = 0.05  # 5% threshold
-
-    last_pivot_idx = 0
-    last_pivot_price = closes[0]
-    direction = None  # 'up' or 'down', set on first significant move
+    # Zigzag pivots with 5% threshold
+    pivots = []
+    min_move = 0.05
+    last_idx = 0
+    last_price = closes[0]
+    direction = None
 
     for i in range(1, len(closes)):
-        change = (closes[i] - last_pivot_price) / last_pivot_price
+        change = (closes[i] - last_price) / last_price
         if direction is None:
             if abs(change) >= min_move:
                 direction = "up" if change > 0 else "down"
-                pivots.append((last_pivot_idx, last_pivot_price, "L" if direction == "up" else "H"))
+                pivots.append((last_idx, last_price,
+                               "L" if direction == "up" else "H"))
         elif direction == "up":
-            if closes[i] > last_pivot_price:
-                last_pivot_idx, last_pivot_price = i, closes[i]
-            elif (last_pivot_price - closes[i]) / last_pivot_price >= min_move:
-                pivots.append((last_pivot_idx, last_pivot_price, "H"))
+            if closes[i] > last_price:
+                last_idx, last_price = i, closes[i]
+            elif (last_price - closes[i]) / last_price >= min_move:
+                pivots.append((last_idx, last_price, "H"))
                 direction = "down"
-                last_pivot_idx, last_pivot_price = i, closes[i]
-        else:  # down
-            if closes[i] < last_pivot_price:
-                last_pivot_idx, last_pivot_price = i, closes[i]
-            elif (closes[i] - last_pivot_price) / last_pivot_price >= min_move:
-                pivots.append((last_pivot_idx, last_pivot_price, "L"))
+                last_idx, last_price = i, closes[i]
+        else:
+            if closes[i] < last_price:
+                last_idx, last_price = i, closes[i]
+            elif (closes[i] - last_price) / last_price >= min_move:
+                pivots.append((last_idx, last_price, "L"))
                 direction = "up"
-                last_pivot_idx, last_pivot_price = i, closes[i]
+                last_idx, last_price = i, closes[i]
 
-    # Always append the last point as a tentative pivot
     pivots.append((len(closes) - 1, closes[-1],
                    "H" if direction == "up" else "L" if direction == "down" else "?"))
 
     if len(pivots) < 3:
-        return out
+        return "?", [], True, ["insufficient_pivots"]
 
-    # Take the LAST up to 8 pivots and label
-    # Elliott motive: L H L H L H (5 waves) then A(L) B(H) C(L) correction
-    # We label the most recent leg as the "current phase"
-    # Simple mapping based on count and direction
     recent = pivots[-8:] if len(pivots) >= 8 else pivots
-    labels = []
-    if len(recent) >= 6:
-        labels = ["1", "2", "3", "4", "5", "A", "B", "C"][:len(recent)-1]
-    elif len(recent) >= 4:
-        labels = ["1", "2", "3", "4", "5"][:len(recent)-1]
-    else:
-        labels = ["?"] * (len(recent) - 1)
+
+    # Trim to start at a Low (impulse motive starts at a trough)
+    start = 0
+    for i, p in enumerate(recent):
+        if p[2] == "L":
+            start = i
+            break
+    seq = recent[start:]
+
+    if len(seq) < 3:
+        return "?", [], True, ["too_few_pivots_after_trim"]
+
+    labels = ["1", "2", "3", "4", "5", "A", "B", "C"][:len(seq) - 1]
 
     phases = []
     for i, label in enumerate(labels):
-        start = recent[i]
-        end   = recent[i + 1]
+        s = seq[i]
+        e = seq[i + 1]
         phases.append({
             "label":       label,
-            "start_date":  dates[start[0]].date(),
-            "start_price": float(start[1]),
-            "end_date":    dates[end[0]].date(),
-            "end_price":   float(end[1]),
+            "start_date":  dates[s[0]].date(),
+            "start_price": float(s[1]),
+            "end_date":    dates[e[0]].date(),
+            "end_price":   float(e[1]),
         })
 
-    out["phases"] = phases
-    out["current_phase"] = labels[-1] if labels else "?"
-    return out
+    # Rule validation
+    violations = []
+    if len(phases) >= 2:
+        if phases[1]["end_price"] <= phases[0]["start_price"]:
+            violations.append("W2 retraced >=100% of W1")
+    if len(phases) >= 5:
+        w1_len = abs(phases[0]["end_price"] - phases[0]["start_price"])
+        w3_len = abs(phases[2]["end_price"] - phases[2]["start_price"])
+        w5_len = abs(phases[4]["end_price"] - phases[4]["start_price"])
+        if w3_len < w1_len and w3_len < w5_len:
+            violations.append("W3 is shortest of impulse waves")
+    if len(phases) >= 4:
+        w1_high = max(phases[0]["start_price"], phases[0]["end_price"])
+        w4_low  = min(phases[3]["start_price"], phases[3]["end_price"])
+        if w4_low <= w1_high:
+            violations.append("W4 overlapped W1 territory")
+
+    if violations:
+        return "?", phases, True, violations
+
+    return labels[-1] if labels else "?", phases, False, []
+
+
+def label_elliott_phase(df):
+    """
+    Try cascading lookbacks (120, 250, 500, 1000 daily bars) until a valid
+    Elliott sequence is found. Returns:
+      - current_phase: '1'|'2'|'3'|'4'|'5'|'A'|'B'|'C'|'?'
+      - degree: 'short-term'|'medium-term'|'long-term'|'very-long-term'|None
+      - lookback_used: int (days) or None
+      - phases: list of phase dicts
+      - validation_failed: bool
+      - violations: list of violation strings (only if all lookbacks failed)
+    """
+    lookback_tiers = [
+        (120,  "short-term"),       # ~6 months
+        (250,  "medium-term"),      # ~1 year
+        (500,  "long-term"),        # ~2 years
+        (1000, "very-long-term"),   # ~4 years
+    ]
+
+    last_attempt = None  # remember most-recent attempt for graceful fallback
+
+    for lookback, degree in lookback_tiers:
+        if df is None or len(df) < lookback:
+            continue
+        phase, phases, failed, violations = _try_elliott_at_lookback(df, lookback)
+        last_attempt = (phase, phases, failed, violations, lookback, degree)
+        if not failed:
+            return {
+                "current_phase":     phase,
+                "degree":            degree,
+                "lookback_used":     lookback,
+                "phases":            phases,
+                "validation_failed": False,
+                "violations":        [],
+            }
+
+    if last_attempt is None:
+        return {
+            "current_phase":     "?",
+            "degree":            None,
+            "lookback_used":     None,
+            "phases":            [],
+            "validation_failed": True,
+            "violations":        ["insufficient_history_for_any_lookback"],
+        }
+
+    phase, phases, failed, violations, lookback, degree = last_attempt
+    return {
+        "current_phase":     "?",
+        "degree":            degree,
+        "lookback_used":     lookback,
+        "phases":            phases,
+        "validation_failed": True,
+        "violations":        violations,
+    }
+
 
 def detect_bollinger_squeeze_breakout(df, period=20):
     try:
@@ -558,6 +711,8 @@ def scan_stock(symbol, flagged_set=None):
     zone_m = rsi_sma_zone(rsi_monthly, rsi_m_sma_val)
     all_three_green = (zone_d == "green" and zone_w == "green" and zone_m == "green")
 
+    # Negative divergence detection (on daily)
+    nd_daily = detect_negative_divergence(daily, rsi_d_series, lookback=21)
 
     # SMA crossover (21/63 on daily)
     sma_cross = detect_sma_crossover(daily, 21, 63)
@@ -633,8 +788,19 @@ def scan_stock(symbol, flagged_set=None):
         "gfs":  gfs,
         "agfs": agfs,
         "corp_action_flag": bool(flagged_set and symbol in flagged_set),
-        "elliott_phase":  elliott["current_phase"],
-        "elliott_phases": elliott["phases"],
+        "nd_status":       nd_daily["status"],
+        "nd_peak1_date":   nd_daily.get("peak1_date"),
+        "nd_peak1_price": nd_daily.get("peak1_price"),
+        "nd_peak1_rsi":    nd_daily.get("peak1_rsi"),
+        "nd_peak2_date":   nd_daily.get("peak2_date"),
+        "nd_peak2_price": nd_daily.get("peak2_price"),
+        "nd_peak2_rsi":    nd_daily.get("peak2_rsi"),
+        "elliott_phase":    elliott["current_phase"],
+        "elliott_degree":   elliott.get("degree"),
+        "elliott_lookback": elliott.get("lookback_used"),
+        "elliott_phases":   elliott["phases"],
+        "elliott_validation_failed": elliott.get("validation_failed", False),
+        "elliott_violations":       elliott.get("violations", []),
         **entry,
     }
 
@@ -653,7 +819,9 @@ def get_market_direction():
         current = float(close.iloc[-1])
         ema50   = float(compute_ema(close, 50).iloc[-1])
         ema200  = float(compute_ema(close, 200).iloc[-1]) if len(close) >= 200 else None
-        rsi     = float(compute_rsi(close).iloc[-1])
+        rsi_series = compute_rsi(close)
+        rsi = float(rsi_series.iloc[-1])
+        market_nd = detect_negative_divergence(df, rsi_series, lookback=21)
         macd_l, sig_l, _ = compute_macd(close)
         macd_bull = float(macd_l.iloc[-1]) > float(sig_l.iloc[-1])
 
@@ -736,6 +904,13 @@ def get_market_direction():
                 "arrow":       _arrow(this_month_close, last_month_close),
                 "in_progress": True,
             },
+            "nd_status":       market_nd["status"],
+            "nd_peak1_date":   market_nd.get("peak1_date"),
+            "nd_peak1_price":  market_nd.get("peak1_price"),
+            "nd_peak1_rsi":    market_nd.get("peak1_rsi"),
+            "nd_peak2_date":   market_nd.get("peak2_date"),
+            "nd_peak2_price":  market_nd.get("peak2_price"),
+            "nd_peak2_rsi":    market_nd.get("peak2_rsi"),
         }
     return results
 
@@ -788,12 +963,22 @@ def scan_sector_direction():
         else:
             status = "Bearish"
 
+        # ND on weekly for sector context (use weekly RSI series + price)
+        sector_nd = detect_negative_divergence(weekly, rsi_weekly, lookback=21)
+
         out[sector] = {
             "status":         status,
             "rsi":            round(rsi_this_week, 2),    # backward-compat
             "rsi_last_week":  round(rsi_last_week, 2) if rsi_last_week is not None else None,
             "rsi_this_week":  round(rsi_this_week, 2),
             "source":         source,
+            "nd_status":       sector_nd["status"],
+            "nd_peak1_date":   sector_nd.get("peak1_date"),
+            "nd_peak1_price":  sector_nd.get("peak1_price"),
+            "nd_peak1_rsi":    sector_nd.get("peak1_rsi"),
+            "nd_peak2_date":   sector_nd.get("peak2_date"),
+            "nd_peak2_price":  sector_nd.get("peak2_price"),
+            "nd_peak2_rsi":    sector_nd.get("peak2_rsi"),
         }
     return out
 
@@ -807,7 +992,7 @@ def run_full_scan():
     import time as _time
     _t0 = _time.time()
     _stage_times = {}
-    print(f"  {datetime.now().strftime('%d %b %Y, %I:%M %p')}")
+    print(f"  {now_ist().strftime('%d %b %Y, %I:%M %p IST')}")
     print("="*60)
 
     job_id = start_job_run("DAILY_SCAN")
@@ -1074,18 +1259,46 @@ def format_stock_block(stock, criteria_list=None):
         sign_pct = f"{diff_pct:+.2f}%" if diff_pct is not None else "—"
         lines.append(f"     SMA 21 Cross   : ₹{inter}  (Δ {sign_abs} / {sign_pct})")
 
-    # Elliott Wave (heuristic)
-    elliott_phase  = stock.get("elliott_phase")
-    elliott_phases = stock.get("elliott_phases", [])
+    # Elliott Wave (heuristic with rule validation + cascading lookback)
+    elliott_phase      = stock.get("elliott_phase")
+    elliott_degree     = stock.get("elliott_degree")
+    elliott_phases     = stock.get("elliott_phases", [])
+    elliott_failed     = stock.get("elliott_validation_failed", False)
+    elliott_violations = stock.get("elliott_violations", [])
+
     if elliott_phase and elliott_phase != "?":
-        lines.append(f"     Elliott Wave   : currently in phase {elliott_phase}")
+        degree_tag = f" [{elliott_degree}]" if elliott_degree else ""
+        lines.append(f"     Elliott Wave   : currently in phase {elliott_phase}{degree_tag}")
         for p in elliott_phases:
             lines.append(
                 f"        W{p['label']}: {p['start_date']} ₹{p['start_price']:.2f} "
                 f"→ {p['end_date']} ₹{p['end_price']:.2f}"
             )
-    # lines.extend([
-    # ])
+    elif elliott_failed:
+        viol_str = ", ".join(elliott_violations[:2]) if elliott_violations else "no clean structure"
+        lines.append(
+            f"     Elliott Wave   : ? (no rule-compliant sequence; last tried "
+            f"{elliott_degree or 'short-term'}: {viol_str})"
+        )
+
+    # Negative Divergence
+    nd_status = stock.get("nd_status", "none")
+    if nd_status != "none":
+        emoji = "🔴" if nd_status == "active" else "🟡"
+        label = "ND ACTIVE" if nd_status == "active" else "ND observed"
+        p1d = stock.get("nd_peak1_date")
+        p1p = stock.get("nd_peak1_price")
+        p1r = stock.get("nd_peak1_rsi")
+        p2d = stock.get("nd_peak2_date")
+        p2p = stock.get("nd_peak2_price")
+        p2r = stock.get("nd_peak2_rsi")
+        lines.append(f"     {emoji} {label}: price ↑ but RSI ↓ in last 21 days")
+        if p1d and p2d:
+            lines.append(
+                f"        Peak 1 ({p1d}): ₹{p1p} (RSI {p1r})  →  "
+                f"Peak 2 ({p2d}): ₹{p2p} (RSI {p2r})"
+            )
+
     return "\n".join(lines)
 
 
@@ -1093,7 +1306,7 @@ def format_results(results):
     lines = [
         "=" * 60,
         "📊 NSE F&O MARKET SCANNER REPORT",
-        datetime.now().strftime("📅 %d %b %Y | ⏰ %I:%M %p"),
+        now_ist().strftime("📅 %d %b %Y | ⏰ %I:%M %p  IST"),
         "=" * 60,
     ]
 
@@ -1139,6 +1352,12 @@ def format_results(results):
             lines.append(_fmt_period("This week",  data.get("this_week"),  " (in progress)"))
             lines.append(_fmt_period("Last month", data.get("last_month")))
             lines.append(_fmt_period("This month", data.get("this_month"), " (in progress)"))
+            # NEW: ND callout for the index
+            nd = data.get("nd_status", "none")
+            if nd != "none":
+                nd_emoji = "🔴" if nd == "active" else "🟡"
+                nd_label = "ND ACTIVE" if nd == "active" else "ND observed"
+                lines.append(f"     {nd_emoji} {nd_label} (daily price/RSI divergence)")
         else:
             lines.append(f"  {idx}: {data}")
 
@@ -1166,6 +1385,13 @@ def format_results(results):
                 )
             else:
                 lines.append(f"  {emoji} {sector}{src_marker}: {status}")
+
+            # NEW: ND callout
+            nd = data.get("nd_status", "none")
+            if nd != "none":
+                nd_emoji = "🔴" if nd == "active" else "🟡"
+                nd_label = "ND ACTIVE" if nd == "active" else "ND observed"
+                lines.append(f"      {nd_emoji} {nd_label} (weekly)")
 
     # ─────────────────────────────────────────────
     # UNIFIED DISPLAY: dedup stocks, segregate by F&O / Investment,
@@ -1265,7 +1491,7 @@ def format_corp_action_report(results):
     lines = [
         "=" * 60,
         "📅 CORPORATE ACTIONS — NEXT 14 DAYS",
-        datetime.now().strftime("Generated %d %b %Y | %I:%M %p"),
+        now_ist().strftime("Generated %d %b %Y | %I:%M %p IST"),
         "=" * 60,
     ]
     upcoming = results.get("corp_actions_upcoming_14d", [])
@@ -1298,13 +1524,13 @@ if __name__ == "__main__":
     print(report)
 
     # Daily scan output
-    daily_name = f"scan_result_{datetime.now().strftime('%d_%b_%Y')}.txt"
+    daily_name = f"scan_result_{now_ist().strftime('%d_%b_%Y')}.txt"
     with open(daily_name, "w", encoding="utf-8") as f:
         f.write(report)
     print(f"\n✅ Daily report saved to {daily_name}")
 
     # Monday-only corp actions output
-    today = datetime.now()
+    today = now_ist()
     if today.weekday() == 0:   # Monday
         corp_name = f"corp_actions_{today.strftime('%d_%b_%Y')}.txt"
         with open(corp_name, "w", encoding="utf-8") as f:
